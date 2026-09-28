@@ -19,9 +19,9 @@ on:
           - lineage-23.0
           - lineage-22.2
       profile:
-        description: 'Config profile (full = NAT/UFW/Fail2ban/cgroups too)'
+        description: 'Config profile. core is verified booting on erhai (OnePlus Pad 2 Pro); full adds cgroup limits only and is still being bisected - see docs/FLASHING.md 4.9'
         required: true
-        default: 'full'
+        default: 'core'
         type: choice
         options:
           - full
