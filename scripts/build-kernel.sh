@@ -100,10 +100,15 @@ KCONFIG_CONFIG="$OUT_DIR/.config" \
 
 if [ -n "$KERNEL_LOCALVERSION" ]; then
     echo "[*] pinning CONFIG_LOCALVERSION='$KERNEL_LOCALVERSION' (AUTO off)"
-    # Invoke through sh explicitly: scripts/config relies on its shebang, which
-    # needs /usr/bin/env (absent on some hosts).
-    sh ./scripts/config --file "$OUT_DIR/.config" --set-str CONFIG_LOCALVERSION "$KERNEL_LOCALVERSION"
-    sh ./scripts/config --file "$OUT_DIR/.config" -d CONFIG_LOCALVERSION_AUTO
+    # scripts/config is a BASH script (shebang "#!/usr/bin/env bash", and it
+    # uses bash arrays).  Never call it as "sh scripts/config": on Debian and
+    # Ubuntu /bin/sh is dash, which dies with
+    #   scripts/config: 129: Syntax error: "(" unexpected
+    # (That is exactly how the first clang-r563880c build failed.)  Call bash
+    # explicitly so it works on every host, including ones where /usr/bin/env
+    # or the exec bit are unavailable.
+    bash ./scripts/config --file "$OUT_DIR/.config" --set-str CONFIG_LOCALVERSION "$KERNEL_LOCALVERSION"
+    bash ./scripts/config --file "$OUT_DIR/.config" -d CONFIG_LOCALVERSION_AUTO
     # scripts/setlocalversion ends with:
     #   echo "${KERNELVERSION}${file_localversion}${config_localversion}${LOCALVERSION}${scm_version}"
     # so with LOCALVERSION_AUTO off it appends the ENVIRONMENT variable
