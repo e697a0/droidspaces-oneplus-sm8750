@@ -3,7 +3,7 @@ name: Build Droidspaces Kernel (OnePlus SM8750)
 # Builds the LineageOS android_kernel_oneplus_sm8750 kernel with full Droidspaces
 # support and packages it as an AnyKernel3 flashable zip.
 #
-# Nothing is built on the caller's machine - everything happens on the runner.
+# Nothing is compiled on the caller's machine - everything happens on the runner.
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ on:
           - lineage-23.0
           - lineage-22.2
       profile:
-        description: 'Droidspaces config profile (full = NAT/UFW/Fail2ban/cgroups too)'
+        description: 'Config profile (full = NAT/UFW/Fail2ban/cgroups too)'
         required: true
         default: 'full'
         type: choice
@@ -58,15 +58,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-droidspaces-sm8750
   cancel-in-progress: false
-
-env:
-  KERNEL_BRANCH: ${{ inputs.kernel_branch || 'lineage-23.2' }}
-  PROFILE: ${{ inputs.profile || 'full' }}
-  CLANG_VERSION: ${{ inputs.clang_version || 'clang-r510928' }}
-  KERNEL_NAME: ${{ inputs.kernel_name || 'Droidspaces Kernel (SM8750 / sun)' }}
-  REPO_BASE: ${{ vars.REPO_BASE || 'https://github.com' }}
 
 jobs:
   build:
@@ -77,6 +70,56 @@ jobs:
     steps:
       - name: Checkout this repository
         uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # All workflow_dispatch inputs are resolved here, in shell, and exported
+      # through $GITHUB_ENV.  This avoids depending on the `inputs` context
+      # inside a workflow-level `env:` block (which is not available on every
+      # runner version).
+      # ------------------------------------------------------------------
+      - name: Resolve build parameters
+        env:
+          IN_BRANCH: ${{ inputs.kernel_branch }}
+          IN_PROFILE: ${{ inputs.profile }}
+          IN_CLANG: ${{ inputs.clang_version }}
+          IN_NAME: ${{ inputs.kernel_name }}
+          IN_UPLOAD: ${{ inputs.upload_config }}
+        run: |
+          set -eu
+          BRANCH="${IN_BRANCH:-lineage-23.2}"
+          PROFILE="${IN_PROFILE:-full}"
+          CLANG_VERSION="${IN_CLANG:-clang-r510928}"
+          KERNEL_NAME="${IN_NAME:-Droidspaces Kernel (SM8750 / sun)}"
+          UPLOAD_CONFIG="${IN_UPLOAD:-true}"
+          REPO_BASE="${{ vars.REPO_BASE }}"
+          REPO_BASE="${REPO_BASE:-https://github.com}"
+
+          case "$PROFILE" in
+            core|full) ;;
+            *) echo "::error::unsupported profile '$PROFILE'"; exit 1 ;;
+          esac
+
+          {
+            echo "KERNEL_BRANCH=$BRANCH"
+            echo "PROFILE=$PROFILE"
+            echo "CLANG_VERSION=$CLANG_VERSION"
+            echo "KERNEL_NAME=$KERNEL_NAME"
+            echo "UPLOAD_CONFIG=$UPLOAD_CONFIG"
+            echo "REPO_BASE=$REPO_BASE"
+            echo "AK3_NAME=Droidspaces-SM8750-${BRANCH}-${PROFILE}.zip"
+          } >> "$GITHUB_ENV"
+
+          {
+            echo "### Build parameters"
+            echo ""
+            echo "| key | value |"
+            echo "|---|---|"
+            echo "| branch | \`$BRANCH\` |"
+            echo "| profile | \`$PROFILE\` |"
+            echo "| clang | \`$CLANG_VERSION\` |"
+            echo "| source mirror | \`$REPO_BASE\` |"
+            echo "| runner | \`$RUNNER_OS/$RUNNER_ARCH\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Free runner disk space
         run: |
@@ -90,14 +133,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             bc bison flex libssl-dev libelf-dev libncurses-dev \
             zip unzip xz-utils zstd python3 curl git make gcc g++ \
-            ca-certificates patch cpio rsync kmod dwarves device-tree-compiler
+            clang lld ca-certificates patch cpio rsync kmod dwarves \
+            device-tree-compiler
           nproc --all
           df -h /
-
-      - name: Install AOSP clang
-        run: ./scripts/install-clang.sh
-        env:
-          CLANG_URL: ${{ vars.CLANG_URL }}
 
       - name: Fetch kernel sources (kernel + modules + devicetrees)
         run: ./scripts/prepare-sources.sh
@@ -108,6 +147,8 @@ jobs:
         working-directory: work/src
         run: |
           set -e
+          echo "[*] dry-run first (catches upstream drift without touching the tree)"
+          patch -p1 --dry-run --batch -f < "$GITHUB_WORKSPACE/patches/001.droidspaces-sysvipc-kabi.patch"
           patch -p1 --batch -f < "$GITHUB_WORKSPACE/patches/001.droidspaces-sysvipc-kabi.patch"
           # Hard guarantee that the ABI-preserving hunk really landed.
           grep -q 'ANDROID_KABI_USE(6, struct sysv_sem sysvsem);' include/linux/sched.h
@@ -115,42 +156,67 @@ jobs:
           echo "[+] kABI patch applied and verified"
 
       - name: Resolve kernel release string
-        id: rel
         run: |
-          set -e
-          if [ -n "${{ inputs.localversion }}" ]; then
-            LV="${{ inputs.localversion }}"
-            echo "[i] using user supplied release suffix"
+          set -eu
+          USER_LV="${{ inputs.localversion }}"
+          if [ -n "$USER_LV" ]; then
+            LV="$USER_LV"
+            echo "[i] using user supplied release suffix: $LV"
           else
             SHA="$(git -C work/src rev-parse HEAD | cut -c1-12)"
             LV="-4k-g${SHA}"
-            echo "[i] derived from branch commit $SHA"
+            echo "[i] derived from branch commit: $LV"
           fi
-          echo "localversion=$LV" >> "$GITHUB_OUTPUT"
-          echo "release suffix: $LV"
-          echo "This must match the ROM's kernel release so that the stock"
-          echo "vendor_dlkm modules keep loading (check with: uname -r)"
+          echo "LOCALVERSION=$LV" >> "$GITHUB_ENV"
+          {
+            echo ""
+            echo "Kernel release suffix: \`$LV\`"
+            echo ""
+            echo "> This must match the ROM kernel release (`uname -r`) or the stock"
+            echo "> vendor_dlkm modules will refuse to load."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Configure BEFORE downloading the ~1 GB toolchain, so a config
+      # regression fails the run in minutes instead of an hour.
+      - name: Configure kernel (merge defconfig + verify, no compile)
+        # Uses a throwaway OUT_DIR so the real build starts from a pristine
+        # tree, and runs before the ~1 GB toolchain download so that a config
+        # regression fails the run in ~5 minutes instead of ~1 hour.
+        run: |
+          ./scripts/build-kernel.sh
+          rm -rf "${{ github.workspace }}/out-validate"
+        env:
+          KERNEL_DIR: ${{ github.workspace }}/work/src
+          OUT_DIR: ${{ github.workspace }}/out-validate
+          CONFIGURE_ONLY: '1'
+
+      - name: Install AOSP clang
+        run: ./scripts/install-clang.sh
+        env:
+          CLANG_URL: ${{ vars.CLANG_URL }}
 
       - name: Build kernel Image
         run: ./scripts/build-kernel.sh
         env:
           KERNEL_DIR: ${{ github.workspace }}/work/src
           OUT_DIR: ${{ github.workspace }}/out
-          LOCALVERSION: ${{ steps.rel.outputs.localversion }}
 
       - name: Package AnyKernel3 zip
         id: package
         run: |
           set -e
-          AK3="Droidspaces-SM8750-${{ env.KERNEL_BRANCH }}-${{ env.PROFILE }}.zip"
           mkdir -p dist
           ./scripts/package-anykernel.sh \
             "$GITHUB_WORKSPACE/out/arch/arm64/boot/Image" \
-            "$GITHUB_WORKSPACE/dist/$AK3" \
-            "${{ env.KERNEL_NAME }}"
+            "$GITHUB_WORKSPACE/dist/$AK3_NAME" \
+            "$KERNEL_NAME"
           ls -l dist/
-          echo "ak3=$AK3" >> "$GITHUB_OUTPUT"
-          unzip -l "dist/$AK3" > dist/zip-contents.txt || true
+          unzip -l "dist/$AK3_NAME" > dist/zip-contents.txt || true
+          {
+            echo "ak3=$AK3_NAME" >> "$GITHUB_OUTPUT"
+            echo "img_sha256=$(sha256sum out/arch/arm64/boot/Image | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+            echo "zip_sha256=$(sha256sum "dist/$AK3_NAME" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          }
 
       - name: Upload flashable zip
         uses: actions/upload-artifact@v4
@@ -161,7 +227,7 @@ jobs:
           compression-level: 0
 
       - name: Upload Image, .config and zip listing
-        if: ${{ inputs.upload_config != false }}
+        if: env.UPLOAD_CONFIG != 'false'
         uses: actions/upload-artifact@v4
         with:
           name: kernel-image-and-config
@@ -172,18 +238,32 @@ jobs:
           if-no-files-found: warn
           compression-level: 0
 
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo ""
+            echo "### Result"
+            echo ""
+            echo "| artifact | sha256 |"
+            echo "|---|---|"
+            echo "| kernel Image | \`${{ steps.package.outputs.img_sha256 }}\` |"
+            echo "| $AK3_NAME | \`${{ steps.package.outputs.zip_sha256 }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY" || true
+
       - name: Create release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${{ github.ref_name }}" \
-            "dist/${{ steps.package.outputs.ak3 }}" \
+            "dist/$AK3_NAME" \
             --title "${{ github.ref_name }}" \
             --notes "Droidspaces kernel for OnePlus SM8750 (sun)
 
-          * branch: ${{ env.KERNEL_BRANCH }}
-          * profile: ${{ env.PROFILE }}
-          * release string: ${{ steps.rel.outputs.localversion }}
-          * clang: ${{ env.CLANG_VERSION }}" \
+          * branch: $KERNEL_BRANCH
+          * profile: $PROFILE
+          * release suffix: $LOCALVERSION
+          * clang: $CLANG_VERSION
+          * kernel Image sha256: ${{ steps.package.outputs.img_sha256 }}" \
             || true

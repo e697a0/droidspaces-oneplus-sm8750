@@ -1,0 +1,118 @@
+name: Validate Droidspaces support against upstream
+
+# Two cheap jobs that catch upstream drift before you spend an hour building:
+#   1. patch  - dry-run the kABI patch against every supported branch
+#   2. config - merge defconfig + fragments, run olddefconfig, verify the result
+#
+# Runs weekly, on demand, and whenever the delta (patches/configs/scripts) changes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: 'Branch used by the config job'
+        required: true
+        default: 'lineage-23.2'
+        type: choice
+        options:
+          - lineage-23.2
+          - lineage-23.1
+          - lineage-23.0
+          - lineage-22.2
+  schedule:
+    - cron: '17 3 * * 1'
+  push:
+    branches:
+      - main
+    paths:
+      - 'patches/**'
+      - 'configs/**'
+      - 'scripts/**'
+      - '.github/workflows/validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    name: patch / ${{ matrix.branch }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: [lineage-22.2, lineage-23.0, lineage-23.1, lineage-23.2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dry-run the kABI patch against ${{ matrix.branch }}
+        run: |
+          set -e
+          BR="${{ matrix.branch }}"
+          WORK="$(mktemp -d)"
+          mkdir -p "$WORK/include/linux"
+          curl -fsSL -o "$WORK/include/linux/sched.h" \
+            "https://github.com/LineageOS/android_kernel_oneplus_sm8750/raw/$BR/include/linux/sched.h"
+          echo "[*] sched.h for $BR: $(wc -c < "$WORK/include/linux/sched.h") bytes"
+          ( cd "$WORK" && patch -p1 --dry-run --batch -f \
+              < "$GITHUB_WORKSPACE/patches/001.droidspaces-sysvipc-kabi.patch" )
+          echo "[+] patch applies cleanly on $BR"
+
+  config:
+    name: config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev libncurses-dev \
+            zstd python3 curl git make gcc patch cpio rsync
+
+      - name: Fetch kernel sources
+        run: ./scripts/prepare-sources.sh
+        env:
+          WORK_DIR: ${{ github.workspace }}/work
+          KERNEL_BRANCH: ${{ inputs.kernel_branch || 'lineage-23.2' }}
+
+      - name: Apply kABI patch
+        working-directory: work/src
+        run: |
+          set -e
+          patch -p1 --batch -f < "$GITHUB_WORKSPACE/patches/001.droidspaces-sysvipc-kabi.patch"
+          grep -q 'ANDROID_KABI_USE(6, struct sysv_sem sysvsem);' include/linux/sched.h
+          echo "[+] patch applied"
+
+      - name: Every config symbol must exist in Kconfig
+        run: ./scripts/check-kconfig-symbols.sh "${{ github.workspace }}/work/src"
+
+      - name: Configure + verify (core)
+        run: ./scripts/build-kernel.sh
+        env:
+          KERNEL_DIR: ${{ github.workspace }}/work/src
+          OUT_DIR: ${{ github.workspace }}/out-core
+          PROFILE: core
+          CONFIGURE_ONLY: '1'
+          LOCALVERSION: '-4k-g000000000000'
+
+      - name: Configure + verify (full)
+        run: ./scripts/build-kernel.sh
+        env:
+          KERNEL_DIR: ${{ github.workspace }}/work/src
+          OUT_DIR: ${{ github.workspace }}/out-full
+          PROFILE: full
+          CONFIGURE_ONLY: '1'
+          LOCALVERSION: '-4k-g000000000000'
+
+      - name: Upload generated .config files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validated-configs
+          path: |
+            out-core/.config
+            out-full/.config
+          if-no-files-found: warn

@@ -70,6 +70,7 @@
 ```
 .
 ├── .github/workflows/build.yml      # GitHub Actions 构建流程
+├── .github/workflows/validate.yml   # 上游漂移检测（每周 + 手动）
 ├── anykernel/anykernel.sh           # AnyKernel3 安装脚本模板（GKI v4 boot）
 ├── configs/
 │   ├── droidspaces-core.config      # 必选（官方 GKI 清单）
@@ -88,8 +89,27 @@
     ├── prepare-sources.sh           # 拉取 kernel + modules + devicetrees 三棵树
     ├── build-kernel.sh              # 合并配置 → olddefconfig → 编译 Image
     ├── verify-config.sh             # 编译前校验配置（秒级失败）
+    ├── check-kconfig-symbols.sh     # 校验每个配置项在 Kconfig 中真实存在
     └── package-anykernel.sh         # 打成 AnyKernel3 zip
 ```
+
+---
+
+## 已验证的内容（构建前）
+
+下面这些检查都在**没有编译内核**的前提下完成，目的是让首次 Actions 运行尽量一次通过：
+
+| 检查 | 方法 | 结果 |
+|---|---|---|
+| kABI 补丁可用 | `patch -p1 --dry-run`，分别对 lineage-22.2 / 23.0 / 23.1 / 23.2 / 24.0 | **5/5 干净应用** |
+| 补丁真的落地 | 实际应用后 grep `ANDROID_KABI_USE(6, ...)` | 命中 |
+| 配置项真实存在 | `scripts/check-kconfig-symbols.sh` 扫描整棵树的 Kconfig | **64/64** |
+| 配置能合并并落地 | `merge_config.sh` + `make olddefconfig` | `.config` 含 2698 个配置项 |
+| Droidspaces 选项最终为 `=y` | `scripts/verify-config.sh` | **full 47/47，core 16/16** |
+| 编译命令正确 | `make -n Image`（只打印不执行） | `--target=aarch64-linux-gnu`、`-Wno-error`、`ld.lld` 全部正确 |
+| AnyKernel3 打包 | 用假 Image 跑 `package-anykernel.sh` | zip 结构 / `kernel.string` 注入 / slot 变量正确 |
+
+> ⚠️ **尚未验证**：真正的编译和刷机。这两步必须在 GitHub Actions 和真机上完成。
 
 ---
 

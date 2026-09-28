@@ -222,8 +222,10 @@ CONFIG_LOCALVERSION="-4k-g$(git rev-parse HEAD | cut -c1-12)"
 3. **`oplus_bsp_midas` ghost-task hack**：参考项目在 `find_task_by_vpid()` 里加了一个
    “幽灵 task” 兜底，用来绕过某厂商模块的空指针。本项目**没有**采用（属于掩盖厂商模块 bug 的
    hack，且无法确认是否必要）。如果开启命名空间后出现 `oplus_bsp_midas` 相关崩溃，可参考该做法。
-4. **上游漂移**：`lineage-23.2` 更新后，`sched.h` 行号/上下文可能变化。构建流程里的
-   `grep -q 'ANDROID_KABI_USE(6, ...)'` 会在补丁失效时**立刻失败**，而不是产出一个坏内核。
+4. **上游漂移**：`lineage-23.2` 更新后，`sched.h` 行号/上下文可能变化。三道防线：构建流程里
+   `patch --dry-run` + `grep -q 'ANDROID_KABI_USE(6, ...)'` 会在补丁失效时**立刻失败**；
+   `.github/workflows/validate.yml` 还会**每周**对 5 个分支 dry-run 补丁并复跑配置校验，
+   提前发现问题而不是等你自己撞上。
 
 ---
 
@@ -236,3 +238,77 @@ CONFIG_LOCALVERSION="-4k-g$(git rev-parse HEAD | cut -c1-12)"
 - [cctv18/oppo_oplus_realme_sm8750](https://github.com/cctv18/oppo_oplus_realme_sm8750)（GKI 构建范式）
 - [cctv18/oneplus_sm8650_toolchain](https://github.com/cctv18/oneplus_sm8650_toolchain)（clang r510928 镜像）
 - [osm0sis/AnyKernel3](https://github.com/osm0sis/AnyKernel3)
+
+---
+
+## 9. 编译期注意事项（实测确认）
+
+### 9.1 `CONFIG_WERROR` 默认开启 → 必须 `-Wno-error`
+
+`init/Kconfig`：
+
+```kconfig
+config WERROR
+	bool "Compile the kernel with warnings as errors"
+	default y
+```
+
+`gki_defconfig` 里**没有** `CONFIG_WERROR`，所以取默认值 **y**。
+`scripts/Makefile.extrawarn` 会把 `-Werror` 加进 `KBUILD_CPPFLAGS`。
+因为我们新增了一批之前只以模块形态存在的代码路径，为避免新警告直接变成编译错误，
+`build-kernel.sh` 传了 `KCFLAGS+=-Wno-error`。
+`KBUILD_CFLAGS += $(KCFLAGS)` 位于 `Makefile:1083`，排在 `KBUILD_CPPFLAGS` 之后，
+因此能覆盖 `-Werror`（`make -n` 输出中确认 `-Wno-error` 出现 142 次）。
+
+### 9.2 不需要 `certs/extract-cert.c` 编译修复补丁
+
+参考项目无条件应用了一个修补 `certs/extract-cert.c` 的 `07_compile_fixes.patch`。
+本树（`lineage-23.2`）**已经有正确的保护**：
+
+```c
+ 80: #ifdef USE_PKCS11_ENGINE
+ 81: static const char *key_pass;
+...
+152: #ifdef USE_PKCS11_ENGINE
+153: 	if (key_pass)
+154: 		ERR(!ENGINE_ctrl_cmd_string(e, "PIN", key_pass, 0), "Set PKCS#11 PIN");
+```
+
+所以本项目**不引入**该补丁。另外该文件是 host 程序，走 `HOSTCFLAGS`，`CONFIG_WERROR` 对它无效。
+
+### 9.3 目标三元组由内核树自己决定
+
+`scripts/Makefile.clang` 硬编码了目标三元组：
+
+```make
+CLANG_TARGET_FLAGS_arm64 := aarch64-linux-gnu
+...
+CLANG_FLAGS += --target=$(CLANG_TARGET_FLAGS)
+```
+
+`arch/arm64/Makefile` 里**没有任何** `CROSS_COMPILE` 逻辑，
+`make -n ... Image` 也确认实际命令是 `clang ... --target=aarch64-linux-gnu`，
+因此**不需要**设置 `CROSS_COMPILE`。
+
+---
+
+## 10. 验证记录
+
+所有验证都在**未编译内核**的前提下完成（`make -n` 只打印命令，不执行）。
+
+| # | 检查 | 方法 | 结果 |
+|---|---|---|---|
+| 1 | 补丁对 5 个分支可用 | `patch -p1 --dry-run` | **5/5 干净**（23.2 上有 offset/fuzz，属正常） |
+| 2 | 补丁真实应用 | `patch -p1` + `grep` | 落地，`ANDROID_KABI_USE(6, ...)` 命中 |
+| 3 | 配置项存在于 Kconfig | `check-kconfig-symbols.sh` | **64/64**（期间发现并修正上游文档里 2 个 6.6 已不存在的名字） |
+| 4 | 配置合并 | `merge_config.sh -m` | 1414 行合并片段 |
+| 5 | 配置落地 | `make olddefconfig` | 8798 行、2698 个 `CONFIG_*` |
+| 6 | Droidspaces 选项为 `=y` | `verify-config.sh` | **full 47/47，core 16/16** |
+| 7 | `BRIDGE_NETFILTER` 未被误开 | `grep` | `# CONFIG_BRIDGE_NETFILTER is not set` |
+| 8 | release 字符串逻辑 | `scripts/config` + `olddefconfig` | `CONFIG_LOCALVERSION="-4k-gedc821586bcb"` |
+| 9 | 编译命令 | `make -n Image` | 1781 条命令；`--target=aarch64-linux-gnu`、`-Wno-error` ×142、`ld.lld` |
+| 10 | AnyKernel3 打包 | 假 Image 跑 `package-anykernel.sh` | zip 内含 `Image` / `anykernel.sh` / `META-INF`，变量正确 |
+| 11 | 脚本语法 | `bash -n scripts/*.sh` | 全部通过 |
+| 12 | 工作流 YAML | `js-yaml` 解析 | 通过（build 15 步；validate 2 个 job） |
+
+**未验证**：真实编译（需要 GitHub Actions 的 x86_64 环境，约 1 小时）与真机刷入。

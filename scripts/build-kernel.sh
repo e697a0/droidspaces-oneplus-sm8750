@@ -10,6 +10,8 @@
 #   LOCALVERSION  override kernel release suffix (e.g. -4k-gdeadbeef1234)
 #   JOBS          parallelism      (default: nproc)
 #   EXTRA_MAKE    extra make args  (optional)
+#   CONFIGURE_ONLY 1 = merge config, run olddefconfig and verify, then stop
+#                  (used by CI so a config regression fails in minutes)
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,6 +22,7 @@ PROFILE="${PROFILE:-full}"
 LOCALVERSION="${LOCALVERSION:-}"
 JOBS="${JOBS:-$(nproc --all)}"
 EXTRA_MAKE="${EXTRA_MAKE:-}"
+CONFIGURE_ONLY="${CONFIGURE_ONLY:-0}"
 
 [ -d "$KERNEL_DIR" ] || { echo "[x] KERNEL_DIR not found: $KERNEL_DIR" >&2; exit 1; }
 
@@ -56,9 +59,15 @@ fi
 export LLVM=1 LLVM_IAS=1
 
 echo "[*] olddefconfig"
-make -j"$JOBS" O="$OUT_DIR" ARCH=arm64 olddefconfig
+# shellcheck disable=SC2086
+make -j"$JOBS" O="$OUT_DIR" ARCH=arm64 $EXTRA_MAKE olddefconfig
 
-"$PROJECT_DIR/scripts/verify-config.sh" "$OUT_DIR/.config" "$PROFILE"
+bash "$PROJECT_DIR/scripts/verify-config.sh" "$OUT_DIR/.config" "$PROFILE"
+
+if [ "$CONFIGURE_ONLY" = "1" ]; then
+    echo "[+] CONFIGURE_ONLY=1 - configuration verified, skipping compile"
+    exit 0
+fi
 
 echo "[*] building Image (-j$JOBS)"
 # shellcheck disable=SC2086
