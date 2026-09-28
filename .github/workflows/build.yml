@@ -105,8 +105,12 @@ jobs:
         run: |
           set -eu
           BRANCH="${IN_BRANCH:-lineage-23.2}"
-          PROFILE="${IN_PROFILE:-full}"
-          CLANG_VERSION="${IN_CLANG:-clang-r510928}"
+          # These fallbacks are what a *tag* build uses (inputs.* are empty
+          # when the run is triggered by pushing a v* tag), so they must match
+          # the verified-good configuration.  core boots on erhai; full
+          # reboot-loops - see docs/FLASHING.md 4.9.
+          PROFILE="${IN_PROFILE:-core}"
+          CLANG_VERSION="${IN_CLANG:-clang-r563880c}"
           KERNEL_NAME="${IN_NAME:-Droidspaces Kernel (SM8750 / sun)}"
           UPLOAD_CONFIG="${IN_UPLOAD:-true}"
           USE_CCACHE="${IN_CCACHE:-true}"
