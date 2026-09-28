@@ -174,3 +174,15 @@ if [ "$DUP" -gt 1 ]; then
     echo "    CONFIG_LOCALVERSION and the LOCALVERSION env var were both appended." >&2
     exit 1
 fi
+
+# The stock ROM reports 6.6.142-4k-gedc821586bcb with no "-dirty".
+# CONFIG_LOCALVERSION_AUTO=y adds "-dirty" whenever the git tree has local
+# changes, and this project always patches include/linux/sched.h, so the clone
+# is always dirty.  KERNEL_LOCALVERSION pins the suffix instead.
+case "$RELEASE" in
+    *-dirty*)
+        echo "[x] release string is marked dirty: $RELEASE" >&2
+        echo "    pin it with KERNEL_LOCALVERSION (see the workflow step)." >&2
+        exit 1
+        ;;
+esac

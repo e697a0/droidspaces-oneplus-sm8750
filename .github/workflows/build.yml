@@ -200,19 +200,25 @@ jobs:
           set -eu
           USER_LV="${{ inputs.localversion }}"
           SHA="$(git -C work/src rev-parse HEAD | cut -c1-12)"
+          # Always pin the suffix explicitly.
+          #
+          # 1) The name matters: scripts/setlocalversion appends the ENVIRONMENT
+          #    variable LOCALVERSION on top of CONFIG_LOCALVERSION, so calling
+          #    this LOCALVERSION once duplicated the suffix.
+          # 2) Pinning matters: with CONFIG_LOCALVERSION_AUTO=y,
+          #    setlocalversion also appends "-dirty" whenever the tree has
+          #    local changes - and we always patch include/linux/sched.h, so
+          #    the clone is always dirty.  The stock kernel is
+          #    "6.6.142-4k-gedc821586bcb" with no -dirty.
           if [ -n "$USER_LV" ]; then
-            # Deliberately NOT named LOCALVERSION: scripts/setlocalversion does
-            #   echo "${KERNELVERSION}${file_localversion}${config_localversion}${LOCALVERSION}${scm_version}"
-            # so when LOCALVERSION_AUTO is off it appends the ENVIRONMENT
-            # variable LOCALVERSION on top of CONFIG_LOCALVERSION.  Naming our
-            # input LOCALVERSION duplicated the suffix in an earlier build.
-            echo "KERNEL_LOCALVERSION=$USER_LV" >> "$GITHUB_ENV"
-            EXPECTED="$USER_LV"
-            echo "[i] explicit override: CONFIG_LOCALVERSION will be pinned to $USER_LV"
+            LV="$USER_LV"
+            echo "[i] using the supplied release suffix"
           else
-            EXPECTED="-4k-g${SHA}"
-            echo "[i] no override: CONFIG_LOCALVERSION_AUTO will derive -g${SHA} from the clone"
+            LV="-4k-g${SHA}"
+            echo "[i] derived from branch commit $SHA"
           fi
+          echo "KERNEL_LOCALVERSION=$LV" >> "$GITHUB_ENV"
+          EXPECTED="$LV"
           {
             echo ""
             echo "Expected kernel release suffix: \`$EXPECTED\`"
