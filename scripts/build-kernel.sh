@@ -135,20 +135,49 @@ if [ "$CONFIGURE_ONLY" = "1" ]; then
 fi
 
 if [ "$SMOKE_ONLY" = "1" ]; then
-    # Representative objects:
-    #   kernel/fork.o                    - uses struct task_struct (our kABI change)
-    #   net/netfilter/nf_tables_api.o    - CONFIG_NF_TABLES, enabled by this project
-    #   net/netfilter/ipset/ip_set_core.o- CONFIG_IP_SET, enabled by this project
-    smoke_objs=(
-        kernel/fork.o
-        net/netfilter/nf_tables_api.o
-        net/netfilter/ipset/ip_set_core.o
+    # Representative objects, each tagged with the CONFIG symbol that actually
+    # pulls it into the build.  The tag matters: forcing an object whose symbol
+    # is off tests a file the real build never touches, and it fails.  With
+    # CONFIG_NF_TABLES=n, nft_activate_next() and friends are not even declared
+    # (include/net/netfilter/nf_tables.h closes the block with
+    # "#endif /* IS_ENABLED(CONFIG_NF_TABLES) */"), so a core-profile build died
+    # with "call to undeclared function" while compiling nf_tables_api.o.
+    #
+    #   kernel/fork.o                     - struct task_struct (our kABI change)
+    #   net/netfilter/nf_tables_api.o     - CONFIG_NF_TABLES (full profile)
+    #   net/netfilter/ipset/ip_set_core.o - CONFIG_IP_SET (core and full)
+    #   drivers/misc/ntsync.o             - CONFIG_NTSYNC (opt-in)
+    smoke_all=(
+        "CONFIG_:kernel/fork.o"
+        "CONFIG_NF_TABLES:net/netfilter/nf_tables_api.o"
+        "CONFIG_IP_SET:net/netfilter/ipset/ip_set_core.o"
     )
     if [ "$ENABLE_NTSYNC" = "1" ]; then
-        # Validates the vendored NTSYNC driver on CI before the long build.
-        smoke_objs+=(drivers/misc/ntsync.o)
+        smoke_all+=("CONFIG_NTSYNC:drivers/misc/ntsync.o")
     fi
+
+    smoke_objs=()
+    smoke_skipped=()
+    for entry in "${smoke_all[@]}"; do
+        sym="${entry%%:*}"
+        obj="${entry#*:}"
+        if [ "$sym" = "CONFIG_" ]; then
+            smoke_objs+=("$obj")
+            continue
+        fi
+        if grep -qE "^${sym}=(y|m)$" "$OUT_DIR/.config"; then
+            smoke_objs+=("$obj")
+        else
+            smoke_skipped+=("$obj ($sym is off)")
+        fi
+    done
+
     echo "[*] SMOKE_ONLY=1 - compiling ${#smoke_objs[@]} representative objects"
+    if [ "${#smoke_skipped[@]}" -gt 0 ]; then
+        for s in "${smoke_skipped[@]}"; do echo "[i] skipped: $s"; done
+    fi
+    [ "${#smoke_objs[@]}" -gt 0 ] || { echo "[x] no smoke object is enabled by this config" >&2; exit 1; }
+
     # shellcheck disable=SC2086
     make -j"$JOBS" O="$OUT_DIR" ARCH=arm64 \
          CC="$CC" LD="$LD" HOSTLD="$LD" \
