@@ -10,8 +10,11 @@
 #   LOCALVERSION  override kernel release suffix (e.g. -4k-gdeadbeef1234)
 #   JOBS          parallelism      (default: nproc)
 #   EXTRA_MAKE    extra make args  (optional)
+#   CC            compiler command  (default: clang, e.g. 'ccache clang')
 #   CONFIGURE_ONLY 1 = merge config, run olddefconfig and verify, then stop
 #                  (used by CI so a config regression fails in minutes)
+#   SMOKE_ONLY    1 = compile a handful of representative objects and stop
+#                  (catches toolchain problems in ~5 min instead of ~1 h)
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,6 +26,8 @@ LOCALVERSION="${LOCALVERSION:-}"
 JOBS="${JOBS:-$(nproc --all)}"
 EXTRA_MAKE="${EXTRA_MAKE:-}"
 CONFIGURE_ONLY="${CONFIGURE_ONLY:-0}"
+SMOKE_ONLY="${SMOKE_ONLY:-0}"
+CC="${CC:-clang}"
 
 [ -d "$KERNEL_DIR" ] || { echo "[x] KERNEL_DIR not found: $KERNEL_DIR" >&2; exit 1; }
 
@@ -69,10 +74,29 @@ if [ "$CONFIGURE_ONLY" = "1" ]; then
     exit 0
 fi
 
+if [ "$SMOKE_ONLY" = "1" ]; then
+    # Representative objects:
+    #   kernel/fork.o                    - uses struct task_struct (our kABI change)
+    #   net/netfilter/nf_tables_api.o    - CONFIG_NF_TABLES, enabled by this project
+    #   net/netfilter/ipset/ip_set_core.o- CONFIG_IP_SET, enabled by this project
+    smoke_objs=(
+        kernel/fork.o
+        net/netfilter/nf_tables_api.o
+        net/netfilter/ipset/ip_set_core.o
+    )
+    echo "[*] SMOKE_ONLY=1 - compiling ${#smoke_objs[@]} representative objects"
+    # shellcheck disable=SC2086
+    make -j"$JOBS" O="$OUT_DIR" ARCH=arm64 \
+         CC="$CC" LD=ld.lld HOSTLD=ld.lld \
+         KCFLAGS+=-Wno-error $EXTRA_MAKE "${smoke_objs[@]}"
+    echo "[+] smoke test passed - toolchain and config can compile this tree"
+    exit 0
+fi
+
 echo "[*] building Image (-j$JOBS)"
 # shellcheck disable=SC2086
 make -j"$JOBS" O="$OUT_DIR" ARCH=arm64 \
-     CC=clang LD=ld.lld HOSTLD=ld.lld \
+     CC="$CC" LD=ld.lld HOSTLD=ld.lld \
      KCFLAGS+=-Wno-error $EXTRA_MAKE Image
 
 IMAGE="$OUT_DIR/arch/arm64/boot/Image"

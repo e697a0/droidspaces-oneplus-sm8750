@@ -289,6 +289,42 @@ CLANG_FLAGS += --target=$(CLANG_TARGET_FLAGS)
 `arch/arm64/Makefile` 里**没有任何** `CROSS_COMPILE` 逻辑，
 `make -n ... Image` 也确认实际命令是 `clang ... --target=aarch64-linux-gnu`，
 因此**不需要**设置 `CROSS_COMPILE`。
+### 9.4 厂商模块不会被 `MODULE_SIG_PROTECT` 拒载
+
+`gki_defconfig` 里有：
+
+```
+CONFIG_MODULE_SIG=y
+CONFIG_MODULE_SIG_PROTECT=y
+```
+
+看起来吓人（符号访问不合法时会返回 `-EACCES`），但实际走的是宽松路径：
+
+- `kernel/module/internal.h` 中，`gki_is_module_unprotected_symbol()` 在
+  `NR_UNPROTECTED_SYMBOLS == 0` 时**直接返回 true**（等于“所有符号都可访问”）；
+  `gki_is_module_protected_export()` 同样返回 false（不做导出保护）。
+- `NR_UNPROTECTED_SYMBOLS` 来自 `include/generated/gki_module_unprotected.h`，
+  其输入是 `ALL_KMI_SYMBOLS`：
+
+```make
+kernel/module/Makefile:38: ALL_KMI_SYMBOLS := include/config/abi_gki_kmi_symbols
+```
+
+- 全树搜索 `abi_gki_kmi_symbols` **只有这一处引用**，没有任何规则去填充它；
+  因此裸 `make` 下它由 `: > $@` 创建成**空文件** → 未保护符号数为 0 → 走宽松分支。
+  （AOSP 的 `build/build.sh` 才会通过 `KMI_SYMBOL_LIST` 填充它。）
+
+实测生成的头文件是合法 C：
+
+```c
+#define NR_UNPROTECTED_SYMBOLS (ARRAY_SIZE(gki_unprotected_symbols))
+#define MAX_UNPROTECTED_NAME_LEN (1)
+static const char gki_unprotected_symbols[][MAX_UNPROTECTED_NAME_LEN] = {
+};
+```
+
+另外 `CONFIG_MODULE_SIG_FORCE` **没有**开启，即使签名校验不通过也只是 taint，不会拒载。
+结论：ROM 里 500+ 个厂商 `.ko` 不会因为符号保护或签名被拦下。
 
 ---
 
@@ -309,6 +345,9 @@ CLANG_FLAGS += --target=$(CLANG_TARGET_FLAGS)
 | 9 | 编译命令 | `make -n Image` | 1781 条命令；`--target=aarch64-linux-gnu`、`-Wno-error` ×142、`ld.lld` |
 | 10 | AnyKernel3 打包 | 假 Image 跑 `package-anykernel.sh` | zip 内含 `Image` / `anykernel.sh` / `META-INF`，变量正确 |
 | 11 | 脚本语法 | `bash -n scripts/*.sh` | 全部通过 |
-| 12 | 工作流 YAML | `js-yaml` 解析 | 通过（build 15 步；validate 2 个 job） |
+| 12 | 工作流 YAML | `js-yaml` 解析 | 通过（build 19 步；validate 2 个 job） |
+| 13 | 冒烟测试目标 | `make -n kernel/fork.o` 等 3 个 | 3/3 被识别，各 1 条编译命令 |
+| 14 | GKI 模块保护 | 生成 `gki_module_{unprotected,protected_exports}.h` | 合法 C；未保护列表为空 → 宽松路径 |
+| 15 | 冒烟 + 配置 CI 流程 | `build-kernel.sh` 的 `CONFIGURE_ONLY` / `SMOKE_ONLY` | 两种模式语法与目标均验证 |
 
 **未验证**：真实编译（需要 GitHub Actions 的 x86_64 环境，约 1 小时）与真机刷入。

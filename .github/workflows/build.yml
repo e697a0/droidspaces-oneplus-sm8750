@@ -49,6 +49,11 @@ on:
         required: false
         default: true
         type: boolean
+      use_ccache:
+        description: 'Cache object files with ccache (makes repeat builds much faster)'
+        required: false
+        default: true
+        type: boolean
 
   push:
     tags:
@@ -84,6 +89,7 @@ jobs:
           IN_CLANG: ${{ inputs.clang_version }}
           IN_NAME: ${{ inputs.kernel_name }}
           IN_UPLOAD: ${{ inputs.upload_config }}
+          IN_CCACHE: ${{ inputs.use_ccache }}
         run: |
           set -eu
           BRANCH="${IN_BRANCH:-lineage-23.2}"
@@ -91,6 +97,7 @@ jobs:
           CLANG_VERSION="${IN_CLANG:-clang-r510928}"
           KERNEL_NAME="${IN_NAME:-Droidspaces Kernel (SM8750 / sun)}"
           UPLOAD_CONFIG="${IN_UPLOAD:-true}"
+          USE_CCACHE="${IN_CCACHE:-true}"
           REPO_BASE="${{ vars.REPO_BASE }}"
           REPO_BASE="${REPO_BASE:-https://github.com}"
 
@@ -105,6 +112,7 @@ jobs:
             echo "CLANG_VERSION=$CLANG_VERSION"
             echo "KERNEL_NAME=$KERNEL_NAME"
             echo "UPLOAD_CONFIG=$UPLOAD_CONFIG"
+            echo "USE_CCACHE=$USE_CCACHE"
             echo "REPO_BASE=$REPO_BASE"
             echo "AK3_NAME=Droidspaces-SM8750-${BRANCH}-${PROFILE}.zip"
           } >> "$GITHUB_ENV"
@@ -117,6 +125,7 @@ jobs:
             echo "| branch | \`$BRANCH\` |"
             echo "| profile | \`$PROFILE\` |"
             echo "| clang | \`$CLANG_VERSION\` |"
+            echo "| ccache | \`$USE_CCACHE\` |"
             echo "| source mirror | \`$REPO_BASE\` |"
             echo "| runner | \`$RUNNER_OS/$RUNNER_ARCH\` |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -133,8 +142,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             bc bison flex libssl-dev libelf-dev libncurses-dev \
             zip unzip xz-utils zstd python3 curl git make gcc g++ \
-            clang lld ca-certificates patch cpio rsync kmod dwarves \
-            device-tree-compiler
+            clang lld ccache ca-certificates patch cpio rsync kmod \
+            dwarves device-tree-compiler
           nproc --all
           df -h /
 
@@ -195,11 +204,54 @@ jobs:
         env:
           CLANG_URL: ${{ vars.CLANG_URL }}
 
+      - name: Configure ccache
+        if: env.USE_CCACHE != 'false'
+        run: |
+          set -eu
+          {
+            echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache"
+            echo "CCACHE_MAXSIZE=2G"
+            echo "CCACHE_COMPRESS=true"
+            echo "CCACHE_SLOPPINESS=file_stat_matches,include_file_ctime,include_file_mtime,time_macros"
+            # The AOSP clang is downloaded fresh on every run, so its mtime and
+            # size are never stable.  Pin the compiler check to a literal
+            # string, otherwise ccache would miss on 100% of builds.
+            echo "CCACHE_COMPILERCHECK=string:aosp-${{ env.CLANG_VERSION }}"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$GITHUB_WORKSPACE/.ccache"
+          ccache --version | head -2
+
+      - name: Restore ccache
+        if: env.USE_CCACHE != 'false'
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-sm8750-${{ env.KERNEL_BRANCH }}-${{ env.PROFILE }}-${{ github.run_number }}
+          restore-keys: |
+            ccache-sm8750-${{ env.KERNEL_BRANCH }}-${{ env.PROFILE }}-
+            ccache-sm8750-${{ env.KERNEL_BRANCH }}-
+
+      - name: Toolchain smoke test (compile a few objects)
+        # Cheap early failure: catches a broken toolchain or a config that
+        # cannot compile this tree in ~5 minutes instead of after a full build.
+        # Output goes to the same OUT_DIR, so the full build continues from here.
+        run: ./scripts/build-kernel.sh
+        env:
+          KERNEL_DIR: ${{ github.workspace }}/work/src
+          OUT_DIR: ${{ github.workspace }}/out
+          SMOKE_ONLY: '1'
+          CC: ${{ env.USE_CCACHE != 'false' && 'ccache clang' || 'clang' }}
+
       - name: Build kernel Image
         run: ./scripts/build-kernel.sh
         env:
           KERNEL_DIR: ${{ github.workspace }}/work/src
           OUT_DIR: ${{ github.workspace }}/out
+          CC: ${{ env.USE_CCACHE != 'false' && 'ccache clang' || 'clang' }}
+
+      - name: ccache stats
+        if: always() && env.USE_CCACHE != 'false'
+        run: ccache -s || true
 
       - name: Package AnyKernel3 zip
         id: package

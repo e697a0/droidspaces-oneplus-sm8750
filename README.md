@@ -108,8 +108,26 @@
 | Droidspaces 选项最终为 `=y` | `scripts/verify-config.sh` | **full 47/47，core 16/16** |
 | 编译命令正确 | `make -n Image`（只打印不执行） | `--target=aarch64-linux-gnu`、`-Wno-error`、`ld.lld` 全部正确 |
 | AnyKernel3 打包 | 用假 Image 跑 `package-anykernel.sh` | zip 结构 / `kernel.string` 注入 / slot 变量正确 |
+| 冒烟测试目标有效 | `make -n kernel/fork.o` 等 3 个目标 | 3/3 被识别，各产生 1 条编译命令 |
+| 厂商模块不会被拒载 | `abi_gki_kmi_symbols` 生成路径分析 | 裸 `make` 下为空 → 走**宽松**路径，模块可访问全部符号 |
 
 > ⚠️ **尚未验证**：真正的编译和刷机。这两步必须在 GitHub Actions 和真机上完成。
+
+### 构建流水线的“快失败”设计
+
+一次完整构建要 40~90 分钟，所以流程被刻意排成**先便宜后昂贵**：
+
+1. 拉源码 → 打补丁（`--dry-run` 先跑一遍）
+2. **配置合并 + `olddefconfig` + 校验**（用 `out-validate` 临时目录，约 5 分钟）
+3. 下载 AOSP clang（约 1 GB）
+4. **冒烟测试**：只编译 3 个代表性目标文件（约 5 分钟）
+   - `kernel/fork.o`（用到 `struct task_struct`，覆盖 kABI 改动）
+   - `net/netfilter/nf_tables_api.o`（本项目新启用的 `CONFIG_NF_TABLES`）
+   - `net/netfilter/ipset/ip_set_core.o`（本项目新启用的 `CONFIG_IP_SET`）
+5. 完整编译 `Image`
+6. AnyKernel3 打包 + 上传
+
+任何一步失败都会停在原地，而不是让你等一小时才看到配置写错了。
 
 ---
 
@@ -168,6 +186,7 @@ git push -u origin main
 | `kernel_name` | Droidspaces Kernel (SM8750 / sun) | 安装器里显示的名字 |
 | `clang_version` | `clang-r510928` | AOSP clang 版本 |
 | `upload_config` | `true` | 是否额外上传 `Image` 与 `.config` 便于排查 |
+| `use_ccache` | `true` | 用 ccache 缓存目标文件，重复构建会快很多（首次构建基本无收益） |
 
 仓库变量（可选，`Settings → Secrets and variables → Actions → Variables`）：
 
