@@ -68,9 +68,13 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
+          # clang + lld are REQUIRED even for the configure-only checks:
+          # build-kernel.sh exports LLVM=1, so kconfig probes both $(CC) and
+          # $(LD)=ld.lld and dies with "linker 'ld.lld' not found" otherwise.
           sudo apt-get install -y --no-install-recommends \
             bc bison flex libssl-dev libelf-dev libncurses-dev \
-            zstd python3 curl git make gcc patch cpio rsync
+            zstd python3 curl git make gcc patch cpio rsync \
+            clang lld
 
       - name: Fetch kernel sources
         run: ./scripts/prepare-sources.sh

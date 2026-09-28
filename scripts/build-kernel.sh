@@ -11,6 +11,8 @@
 #   JOBS          parallelism      (default: nproc)
 #   EXTRA_MAKE    extra make args  (optional)
 #   CC            compiler command  (default: clang, e.g. 'ccache clang')
+#   LD            linker           (default: ld.lld; both are required even in
+#                  CONFIGURE_ONLY mode because LLVM=1 makes kconfig use them)
 #   CONFIGURE_ONLY 1 = merge config, run olddefconfig and verify, then stop
 #                  (used by CI so a config regression fails in minutes)
 #   SMOKE_ONLY    1 = compile a handful of representative objects and stop
@@ -31,8 +33,26 @@ CONFIGURE_ONLY="${CONFIGURE_ONLY:-0}"
 SMOKE_ONLY="${SMOKE_ONLY:-0}"
 ENABLE_NTSYNC="${ENABLE_NTSYNC:-0}"
 CC="${CC:-clang}"
+LD="${LD:-ld.lld}"
 
 [ -d "$KERNEL_DIR" ] || { echo "[x] KERNEL_DIR not found: $KERNEL_DIR" >&2; exit 1; }
+
+# --- preflight --------------------------------------------------------------
+# LLVM=1 makes the kernel use $(CC) and $(LD)=ld.lld even for the kconfig
+# stage, where a missing one surfaces as a cryptic
+#   scripts/Kconfig.include:41: linker 'ld.lld' not found
+# Check here instead so the failure names the missing tool.
+check_tool() {
+    local cmd="${1%% *}"        # CC may be "ccache clang"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "[x] required tool not found: $cmd" >&2
+        echo "    Debian/Ubuntu: sudo apt-get install -y clang lld" >&2
+        echo "    or override with CC=/path/to/clang LD=/path/to/ld.lld" >&2
+        exit 1
+    fi
+}
+check_tool "$CC"
+check_tool "$LD"
 
 frags=(
     arch/arm64/configs/gki_defconfig
@@ -71,8 +91,10 @@ KCONFIG_CONFIG="$OUT_DIR/.config" \
 
 if [ -n "$LOCALVERSION" ]; then
     echo "[*] pinning CONFIG_LOCALVERSION='$LOCALVERSION' (AUTO off)"
-    ./scripts/config --file "$OUT_DIR/.config" --set-str CONFIG_LOCALVERSION "$LOCALVERSION"
-    ./scripts/config --file "$OUT_DIR/.config" -d CONFIG_LOCALVERSION_AUTO
+    # Invoke through sh explicitly: scripts/config relies on its shebang, which
+    # needs /usr/bin/env (absent on some hosts).
+    sh ./scripts/config --file "$OUT_DIR/.config" --set-str CONFIG_LOCALVERSION "$LOCALVERSION"
+    sh ./scripts/config --file "$OUT_DIR/.config" -d CONFIG_LOCALVERSION_AUTO
 fi
 
 export LLVM=1 LLVM_IAS=1
@@ -105,7 +127,7 @@ if [ "$SMOKE_ONLY" = "1" ]; then
     echo "[*] SMOKE_ONLY=1 - compiling ${#smoke_objs[@]} representative objects"
     # shellcheck disable=SC2086
     make -j"$JOBS" O="$OUT_DIR" ARCH=arm64 \
-         CC="$CC" LD=ld.lld HOSTLD=ld.lld \
+         CC="$CC" LD="$LD" HOSTLD="$LD" \
          KCFLAGS+=-Wno-error $EXTRA_MAKE "${smoke_objs[@]}"
     echo "[+] smoke test passed - toolchain and config can compile this tree"
     exit 0
@@ -114,7 +136,7 @@ fi
 echo "[*] building Image (-j$JOBS)"
 # shellcheck disable=SC2086
 make -j"$JOBS" O="$OUT_DIR" ARCH=arm64 \
-     CC="$CC" LD=ld.lld HOSTLD=ld.lld \
+     CC="$CC" LD="$LD" HOSTLD="$LD" \
      KCFLAGS+=-Wno-error $EXTRA_MAKE Image
 
 IMAGE="$OUT_DIR/arch/arm64/boot/Image"
