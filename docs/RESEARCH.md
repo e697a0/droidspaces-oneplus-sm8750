@@ -398,6 +398,53 @@ fi
 3. 需要强制指定时，写 `CONFIG_LOCALVERSION`、关掉 `AUTO`，并 `export LOCALVERSION=""`
    （置空但**必须存在**，否则会被追加 `+`）；
 4. 构建结束时断言 release 字符串里 `-4k` 只出现一次，否则直接让构建失败。
+### 9.7 目标平台是纯 64 位，AnyKernel3 上游工具是 32 位（打包必须自备 AArch64 工具）
+
+**现象**：TWRP / 管理器刷入只报一行 `Busybox setup failed. Aborting...`。
+
+**证据链**（全部实测）：
+
+```
+$ getprop ro.product.cpu.abilist      → arm64-v8a
+$ getprop ro.product.cpu.abilist32    → （空）
+
+$ ./tools/busybox                     → cannot execute binary file: Exec format error
+
+$ 读 ELF 头 tools/*                    → busybox / fec / httools_static / lptools_static /
+                                        magiskboot / magiskpolicy / snapshotupdater_static
+                                        全部 ELF32 ARM
+```
+
+SM8750 的 **Oryon 核心是纯 64 位设计，不实现 AArch32**，因此该平台 Android 只有 `arm64-v8a`
+（`abilist32` 为空），任何 32 位 ELF 都会以 `ENOEXEC` 失败。
+
+`update-binary` 里：
+
+```sh
+setup_bb() {
+  ...
+  bb=$AKHOME/tools/busybox;
+  chmod 755 $bb;
+  $bb chmod -R 755 tools bin;   # 失败
+  $bb --install -s bin;         # 失败 → setup_bb 返回非 0
+}
+
+setup_bb;
+if [ $? != 0 -o -z "$(ls bin)" ]; then
+  abort "Busybox setup failed. Aborting...";
+fi;
+```
+
+**关键结论**：这与「用什么前端刷」无关 —— TWRP、KernelSU/SukiSU 管理器、Magisk 都调用同一份
+`update-binary`，所以 32 位工具在任何前端下都会失败，**换个 App 不解决问题**。
+
+**修复**：本项目在 `anykernel/tools/` 内置一整套 **AArch64** 工具（7 个二进制，全部实测可运行），
+`package-anykernel.sh` 打包时覆盖上游那套，并断言每个都是 64 位 ELF（`7f 45 4c 46 02`）。
+来源与许可证见 `anykernel/tools/NOTICE.md`。
+
+**顺带发现**：设备实际报 `ro.product.device = OP615EL1`、`ro.product.vendor.device = OP6190L1`
+（即 `erhai`，OnePlus Pad 2 Pro），而不是 LineageOS 代号。安装器白名单因此补上了
+`OP615EL1`、`OP6190L1` 等 OPLUS OTA 名称。
 
 ---
 
@@ -433,5 +480,9 @@ fi
 | 24 | release 重复后缀复现 | 手动跑 `scripts/setlocalversion` | 设 `LOCALVERSION` 环境变量 → **逐字节复现**线上内核的重复后缀 |
 | 25 | 修复后行为 | 同上三组场景 | 默认 `6.6.142-4k`（本机无 git）；覆盖时 `6.6.142-4k-gedc821586bcb`，均正确 |
 | 26 | 产物就是真实 arm64 内核 | Image 偏移 56..59 魔数 | `41524d64` = `ARMd` ✅ |
+| 27 | 平台 32 位能力 | `ro.product.cpu.abilist32` | **空** → 纯 64 位 |
+| 28 | 上游 AK3 工具架构 | 7 个二进制的 ELF 头 | 全部 **ELF32/ARM** |
+| 29 | 内置 AArch64 工具可用性 | 逐个在本机执行 | **7/7 通过**；`--install -s` 建出 358 个 applet |
+| 30 | 修复后模拟安装 | 复刻 `setup_bb()` 三步 | 全部成功 → 不再触发 abort |
 
 **未验证**：真实编译（需要 GitHub Actions 的 x86_64 环境，约 1 小时）与真机刷入。

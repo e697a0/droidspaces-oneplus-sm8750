@@ -12,11 +12,22 @@ do.modules=0
 do.systemless=0
 do.cleanup=1
 do.cleanuponabort=0
+# LineageOS codenames for the SM8750 (sun) family
 device.name1=dodge
 device.name2=erhai
 device.name3=hummer
 device.name4=ktm
-device.name5=
+# ...plus the OPPO/OnePlus OTA product names, because several ROMs report
+# ro.product.device as one of these instead of the LineageOS codename
+# (an OnePlus Pad 2 Pro reports OP615EL1 / OP6190L1).
+device.name5=OP5D0DL1
+device.name6=OP5D55L1
+device.name7=OP615EL1
+device.name8=OP6190L1
+device.name9=OP60EBL1
+device.name10=OP6113L1
+device.name11=PLQ110
+device.name12=
 supported.versions=
 supported.patchlevels=
 supported.vendorpatchlevels=

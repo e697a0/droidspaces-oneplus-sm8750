@@ -30,6 +30,31 @@ echo "[*] fetching AnyKernel3 ($AK3_REPO @ $AK3_REF)"
 git clone --depth=1 --branch "$AK3_REF" "$AK3_REPO" "$WORK/ak3"
 rm -rf "$WORK/ak3/.git" "$WORK/ak3/.github" "$WORK/ak3/README.md"
 
+# --- replace the 32-bit tools with our AArch64 set --------------------------
+# Upstream AnyKernel3 ships its tools/ built for 32-bit ARM.  SM8750 ("sun",
+# Oryon cores) is 64-bit only -- ro.product.cpu.abilist32 is empty -- so every
+# one of them dies with "Exec format error" and the installer aborts with
+# "Busybox setup failed. Aborting...".  Overlay the AArch64 builds we carry.
+# See anykernel/tools/NOTICE.md for provenance and licences.
+TOOLS_DIR="$PROJECT_DIR/anykernel/tools"
+[ -d "$TOOLS_DIR" ] || { echo "[x] missing $TOOLS_DIR" >&2; exit 1; }
+n_tools=0
+for t in "$TOOLS_DIR"/*; do
+    [ -f "$t" ] || continue
+    b="$(basename "$t")"
+    case "$b" in *.md|*.txt) continue ;; esac
+    # must be a 64-bit ELF: 7f 45 4c 46 then EI_CLASS == 2
+    cls="$(head -c 5 "$t" | od -An -tx1 | tr -d ' \n')"
+    if [ "$cls" != "7f454c4602" ]; then
+        echo "[x] $b is not a 64-bit ELF binary (header: $cls)" >&2
+        exit 1
+    fi
+    cp -f "$t" "$WORK/ak3/tools/$b"
+    n_tools=$((n_tools + 1))
+done
+chmod 755 "$WORK/ak3"/tools/*
+echo "[*] overlaid $n_tools AArch64 tools (upstream ships 32-bit ARM)"
+
 cp -f "$IMAGE" "$WORK/ak3/Image"
 cp -f "$PROJECT_DIR/anykernel/anykernel.sh" "$WORK/ak3/anykernel.sh"
 chmod +x "$WORK/ak3/anykernel.sh"
@@ -49,7 +74,7 @@ if [ "$AK3_DEVICECHECK" = "0" ]; then
 fi
 
 # --- sanity: the injected values must actually be there ---------------------
-grep -q "^kernel.string=${ESCAPED_NAME}$" "$WORK/ak3/anykernel.sh" || {
+grep -qxF "kernel.string=${KERNEL_NAME}" "$WORK/ak3/anykernel.sh" || {
     echo "[x] kernel.string injection failed" >&2
     exit 1
 }

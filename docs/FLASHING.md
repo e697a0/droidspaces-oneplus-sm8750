@@ -234,6 +234,38 @@ su -c 'ls /proc/sys/net/ipv4/ip_forward'
 su -c 'iptables -t nat -L -n | head'
 ```
 
+### 4.7 安装时报 `Busybox setup failed. Aborting...`（已修复的打包问题）
+
+**现象**：TWRP / 管理器刷入时只有这一行报错，其他什么都不显示。
+
+**原因**：AnyKernel3 上游自带的 `tools/` 里那 7 个二进制**全部是 32 位 ARM**，
+而 SM8750（骁龙 8 Elite，Oryon 核心）是一个**纯 64 位平台**：
+
+```
+ro.product.cpu.abilist   = arm64-v8a
+ro.product.cpu.abilist32 = (空)
+
+$ ./tools/busybox
+cannot execute binary file: Exec format error
+```
+
+`update-binary` 里的 `setup_bb()` 因此失败，于是 `abort "Busybox setup failed. Aborting..."`。
+
+**修复**：本项目现在自带一套 **AArch64** 工具（`anykernel/tools/`，7 个二进制全部在 SM8750 上实测可运行），
+打包时会覆盖上游那套 32 位的。**用最新代码重新构建即可**，你不需要做任何额外操作。
+
+> ⚠️ 这个问题**与用哪个前端刷无关** —— TWRP、KernelSU / SukiSU 管理器、Magisk 都会调用同一个
+> `update-binary`，所以旧包在任何前端下都会失败，换个 App 没用。
+
+### 4.8 安装器报 `Unsupported device. Aborting...`
+
+安装器带机型白名单。本项目已覆盖 LineageOS 代号（`dodge` / `erhai` / `hummer` / `ktm`）
+**以及** OPPO/一加的 OTA 名称（`OP5D0DL1`、`OP5D55L1`、`OP615EL1`、`OP6190L1`、`OP60EBL1`、`OP6113L1`、`PLQ110`）——
+因为不少 ROM 把 `ro.product.device` 报成后者而不是 LineageOS 代号。
+
+如果你的设备仍不在其中，把工作流的 **`device_check` 设为 `false`** 重新构建即可
+（但请不要在非 SM8750 机型上安装）。
+
 ---
 
 ## 5. 卸载 / 回退

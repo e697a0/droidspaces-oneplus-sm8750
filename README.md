@@ -72,7 +72,10 @@
 .
 ├── .github/workflows/build.yml      # GitHub Actions 构建流程
 ├── .github/workflows/validate.yml   # 上游漂移检测（每周 + 手动）
-├── anykernel/anykernel.sh           # AnyKernel3 安装脚本模板（GKI v4 boot）
+├── anykernel/
+│   ├── anykernel.sh                 # AnyKernel3 安装脚本模板（GKI v4 boot）
+│   └── tools/                       # AArch64 版 AnyKernel3 工具（见其中 NOTICE.md）
+│       #   ↑ 上游自带的 7 个工具都是 32 位 ARM，在 SM8750 上无法运行
 ├── configs/
 │   ├── droidspaces-core.config      # 必选（官方 GKI 清单）
 │   ├── droidspaces-containers.config# cgroup / devtmpfs / overlayfs / seccomp
@@ -123,6 +126,9 @@
 | `AK3_DEVICECHECK=0` | 打包后检查 `anykernel.sh` | `do.devicecheck=0`，zip 完整性 OK |
 | shell 反引号审计 | 扫描全部脚本与工作流 | 修掉 1 处会触发命令替换的反引号 |
 | 符号检查性能 | 全树扫描次数 | 从 64 次降到 **1 次**（20241 个符号 / 1778 个 Kconfig） |
+| 平台是纯 64 位 | 设备上读 `ro.product.cpu.abilist32` | **空**（Oryon 核心无 AArch32） |
+| 上游 AK3 工具架构 | 读 7 个二进制的 ELF 头 | **全部 ELF32/ARM** → 必然 `Exec format error` |
+| 内置的 AArch64 工具 | 逐个在 SM8750 上运行 | **7/7 可运行**；模拟 `setup_bb()` 三步全过 |
 
 > ⚠️ **尚未验证**：真正的编译和刷机。这两步必须在 GitHub Actions 和真机上完成。
 
