@@ -7,7 +7,14 @@
 #   KERNEL_DIR    kernel source (default: ../work/src relative to this repo)
 #   OUT_DIR       build output     (default: $KERNEL_DIR/out)
 #   PROFILE       core | full      (default: full)
-#   LOCALVERSION  override kernel release suffix (e.g. -4k-gdeadbeef1234)
+#   KERNEL_LOCALVERSION
+#                  override the kernel release suffix (e.g. -4k-gdeadbeef1234).
+#                  Leave unset to let CONFIG_LOCALVERSION_AUTO derive
+#                  "-g<git sha>" from the clone, which is what the stock ROM
+#                  does.  NOTE: do NOT name this variable LOCALVERSION --
+#                  scripts/setlocalversion appends the *environment* variable
+#                  LOCALVERSION on top of CONFIG_LOCALVERSION when
+#                  LOCALVERSION_AUTO is off, which duplicates the suffix.
 #   JOBS          parallelism      (default: nproc)
 #   EXTRA_MAKE    extra make args  (optional)
 #   CC            compiler command  (default: clang, e.g. 'ccache clang')
@@ -26,7 +33,9 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KERNEL_DIR="${KERNEL_DIR:-$PROJECT_DIR/work/src}"
 OUT_DIR="${OUT_DIR:-$KERNEL_DIR/out}"
 PROFILE="${PROFILE:-full}"
-LOCALVERSION="${LOCALVERSION:-}"
+KERNEL_LOCALVERSION="${KERNEL_LOCALVERSION:-}"
+# Never let a stray LOCALVERSION from the caller leak into scripts/setlocalversion.
+unset LOCALVERSION
 JOBS="${JOBS:-$(nproc --all)}"
 EXTRA_MAKE="${EXTRA_MAKE:-}"
 CONFIGURE_ONLY="${CONFIGURE_ONLY:-0}"
@@ -89,12 +98,22 @@ echo "[*] merging defconfig fragments (profile=$PROFILE)"
 KCONFIG_CONFIG="$OUT_DIR/.config" \
     scripts/kconfig/merge_config.sh -m -O "$OUT_DIR" "${frags[@]}"
 
-if [ -n "$LOCALVERSION" ]; then
-    echo "[*] pinning CONFIG_LOCALVERSION='$LOCALVERSION' (AUTO off)"
+if [ -n "$KERNEL_LOCALVERSION" ]; then
+    echo "[*] pinning CONFIG_LOCALVERSION='$KERNEL_LOCALVERSION' (AUTO off)"
     # Invoke through sh explicitly: scripts/config relies on its shebang, which
     # needs /usr/bin/env (absent on some hosts).
-    sh ./scripts/config --file "$OUT_DIR/.config" --set-str CONFIG_LOCALVERSION "$LOCALVERSION"
+    sh ./scripts/config --file "$OUT_DIR/.config" --set-str CONFIG_LOCALVERSION "$KERNEL_LOCALVERSION"
     sh ./scripts/config --file "$OUT_DIR/.config" -d CONFIG_LOCALVERSION_AUTO
+    # scripts/setlocalversion ends with:
+    #   echo "${KERNELVERSION}${file_localversion}${config_localversion}${LOCALVERSION}${scm_version}"
+    # so with LOCALVERSION_AUTO off it appends the ENVIRONMENT variable
+    # LOCALVERSION on top of CONFIG_LOCALVERSION.  Export it as empty (set but
+    # empty) so it contributes nothing; leaving it *unset* would instead make
+    # setlocalversion append a "+".
+    export LOCALVERSION=""
+else
+    echo "[*] no KERNEL_LOCALVERSION override: CONFIG_LOCALVERSION_AUTO=y will"
+    echo "    append -g<12-char git sha> to CONFIG_LOCALVERSION (default '-4k')"
 fi
 
 export LLVM=1 LLVM_IAS=1
@@ -142,4 +161,16 @@ make -j"$JOBS" O="$OUT_DIR" ARCH=arm64 \
 IMAGE="$OUT_DIR/arch/arm64/boot/Image"
 [ -s "$IMAGE" ] || { echo "[x] Image was not produced" >&2; exit 1; }
 echo "[+] built $IMAGE ($(stat -c%s "$IMAGE") bytes)"
-echo "[+] release string: $(strings "$IMAGE" | grep -m1 -oE '^6\.[0-9]+\.[0-9]+[^ ]*' || echo '(unknown)')"
+
+RELEASE="$(strings "$IMAGE" | grep -m1 -oE '^6\.[0-9]+\.[0-9]+[^ ]*' || echo '(unknown)')"
+echo "[+] release string: $RELEASE"
+
+# Guard against a duplicated suffix.  A real bug we hit: scripts/setlocalversion
+# appends both CONFIG_LOCALVERSION and the LOCALVERSION environment variable, so
+# the suffix showed up twice and the vermagic no longer matched the ROM modules.
+DUP=$(printf '%s' "$RELEASE" | grep -o -- '-4k' | wc -l)
+if [ "$DUP" -gt 1 ]; then
+    echo "[x] release string contains '-4k' $DUP times: $RELEASE" >&2
+    echo "    CONFIG_LOCALVERSION and the LOCALVERSION env var were both appended." >&2
+    exit 1
+fi

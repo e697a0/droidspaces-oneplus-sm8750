@@ -361,6 +361,43 @@ patches/optional/ntsync/
 适配版本来自同平台参考项目（同一棵 LineageOS 23.2 / SM8750 树，实机验证过）。
 本项目额外把 `drivers/misc/ntsync.o` 加入 CI 冒烟测试目标 —— 一旦它编译不过，
 5 分钟内就会失败，而不是等完整构建跑完。
+### 9.6 `scripts/setlocalversion` 会额外拼接环境变量 `LOCALVERSION`
+
+这是我实际踩到的坑，记录下来以免重犯。`scripts/setlocalversion` 最后一行是：
+
+```sh
+echo "${KERNELVERSION}${file_localversion}${config_localversion}${LOCALVERSION}${scm_version}"
+```
+
+而它前面是这样决定 `scm_version` 的：
+
+```sh
+if grep -q "^CONFIG_LOCALVERSION_AUTO=y$" include/config/auto.conf; then
+    scm_version="$(scm_version)"
+elif [ "${LOCALVERSION+set}" != "set" ]; then
+    scm_version="$(scm_version --short)"   # 未设置时会被追加一个 "+"
+fi
+```
+
+也就是说：**当 `CONFIG_LOCALVERSION_AUTO` 不是 `y` 时，环境变量 `LOCALVERSION` 会被直接拼到版本串上**，
+与 `CONFIG_LOCALVERSION` 叠加。
+
+本项目的 CI 最初用 `LOCALVERSION` 作为环境变量名传递后缀，于是产物变成：
+
+```
+6.6.142-4k-gedc821586bcb-4k-gedc821586bcb
+```
+
+（实测复现：`CONFIG_LOCALVERSION` 与环境变量取同值时，`setlocalversion` 的输出与线上内核逐字节一致。）
+
+**正确做法**（已实现）：
+
+1. 变量改名为 `KERNEL_LOCALVERSION`，并 `unset LOCALVERSION`；
+2. **默认不覆盖**：保留 `CONFIG_LOCALVERSION_AUTO=y` + `CONFIG_LOCALVERSION="-4k"`，
+   由 git 自动产生 `-4k-g<sha12>`，与 ROM 一致；
+3. 需要强制指定时，写 `CONFIG_LOCALVERSION`、关掉 `AUTO`，并 `export LOCALVERSION=""`
+   （置空但**必须存在**，否则会被追加 `+`）；
+4. 构建结束时断言 release 字符串里 `-4k` 只出现一次，否则直接让构建失败。
 
 ---
 
@@ -393,5 +430,8 @@ patches/optional/ntsync/
 | 21 | 安装器白名单可关闭 | `AK3_DEVICECHECK=0` | `anykernel.sh` 中 `do.devicecheck=0` |
 | 22 | shell 反引号审计 | 全仓库扫描未转义的反引号 | 修复 1 处会触发命令替换的位置 |
 | 23 | 符号检查性能 | 全树扫描次数 | **64 → 1 次**（20241 符号 / 1778 Kconfig，0.6s） |
+| 24 | release 重复后缀复现 | 手动跑 `scripts/setlocalversion` | 设 `LOCALVERSION` 环境变量 → **逐字节复现**线上内核的重复后缀 |
+| 25 | 修复后行为 | 同上三组场景 | 默认 `6.6.142-4k`（本机无 git）；覆盖时 `6.6.142-4k-gedc821586bcb`，均正确 |
+| 26 | 产物就是真实 arm64 内核 | Image 偏移 56..59 魔数 | `41524d64` = `ARMd` ✅ |
 
 **未验证**：真实编译（需要 GitHub Actions 的 x86_64 环境，约 1 小时）与真机刷入。

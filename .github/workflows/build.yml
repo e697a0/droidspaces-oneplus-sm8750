@@ -199,21 +199,26 @@ jobs:
         run: |
           set -eu
           USER_LV="${{ inputs.localversion }}"
+          SHA="$(git -C work/src rev-parse HEAD | cut -c1-12)"
           if [ -n "$USER_LV" ]; then
-            LV="$USER_LV"
-            echo "[i] using user supplied release suffix: $LV"
+            # Deliberately NOT named LOCALVERSION: scripts/setlocalversion does
+            #   echo "${KERNELVERSION}${file_localversion}${config_localversion}${LOCALVERSION}${scm_version}"
+            # so when LOCALVERSION_AUTO is off it appends the ENVIRONMENT
+            # variable LOCALVERSION on top of CONFIG_LOCALVERSION.  Naming our
+            # input LOCALVERSION duplicated the suffix in an earlier build.
+            echo "KERNEL_LOCALVERSION=$USER_LV" >> "$GITHUB_ENV"
+            EXPECTED="$USER_LV"
+            echo "[i] explicit override: CONFIG_LOCALVERSION will be pinned to $USER_LV"
           else
-            SHA="$(git -C work/src rev-parse HEAD | cut -c1-12)"
-            LV="-4k-g${SHA}"
-            echo "[i] derived from branch commit: $LV"
+            EXPECTED="-4k-g${SHA}"
+            echo "[i] no override: CONFIG_LOCALVERSION_AUTO will derive -g${SHA} from the clone"
           fi
-          echo "LOCALVERSION=$LV" >> "$GITHUB_ENV"
           {
             echo ""
-            echo "Kernel release suffix: \`$LV\`"
+            echo "Expected kernel release suffix: \`$EXPECTED\`"
             echo ""
-            echo "> This must match the ROM kernel release (\`uname -r\`) or the stock"
-            echo "> vendor_dlkm modules will refuse to load."
+            echo "> Check with \`uname -r\` after flashing.  It must match the ROM kernel"
+            echo "> release or the stock vendor_dlkm modules will refuse to load."
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Configure BEFORE downloading the ~1 GB toolchain, so a config
@@ -381,7 +386,7 @@ jobs:
 
           * branch: $KERNEL_BRANCH
           * profile: $PROFILE
-          * release suffix: $LOCALVERSION
+          * release suffix: ${KERNEL_LOCALVERSION:-auto (git-derived)}
           * clang: $CLANG_VERSION
           * kernel Image sha256: ${{ steps.package.outputs.img_sha256 }}" \
             || true

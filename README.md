@@ -214,7 +214,7 @@ unzip -t Droidspaces-SM8750-lineage-23.2-full.zip
 |---|---|---|
 | `kernel_branch` | `lineage-23.2` | 上游内核分支，决定内核版本（6.6.x） |
 | `profile` | `full` | `full` = 完整支持；`core` = 仅官方 GKI 最小集 |
-| `localversion` | 自动 | 内核 release 后缀；必须与 ROM 一致，否则厂商模块不加载 |
+| `localversion` | 自动 | 内核 release 后缀。**留空即可** —— 让内核自己从 git 取 `-4k-g<commit>`；只有需要强制指定时才填 |
 | `kernel_name` | Droidspaces Kernel (SM8750 / sun) | 安装器里显示的名字 |
 | `clang_version` | `clang-r510928` | AOSP clang 版本 |
 | `upload_config` | `true` | 是否额外上传 `Image` 与 `.config` 便于排查 |

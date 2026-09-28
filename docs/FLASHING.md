@@ -197,7 +197,36 @@ ANDROID_KABI_USE(6, struct sysv_sem sysvsem);
 grep -E '^CONFIG_(SYSVIPC|IPC_NS|PID_NS|UTS_NS|NET_NS|USER_NS|DEVTMPFS)=' .config
 ```
 
-### 4.5 容器能起但没网（NAT 模式）
+### 4.5 `uname -r` 里后缀出现了两次（已修复的构建 bug）
+
+如果刷完后 `uname -r` 长这样：
+
+```
+6.6.142-4k-gedc821586bcb-4k-gedc821586bcb
+        ^^^^^^^^^^^^^^^^^^ ^^^^^^^^^^^^^^^^^^  后缀重复了
+```
+
+那说明你用的是**修复前**的构建产物。原因是我把工作流的环境变量
+取名成了 `LOCALVERSION`，而内核的 `scripts/setlocalversion` 会这样做：
+
+```sh
+echo "${KERNELVERSION}${file_localversion}${config_localversion}${LOCALVERSION}${scm_version}"
+```
+
+也就是当 `CONFIG_LOCALVERSION_AUTO` 关闭时，它会**把环境变量 `LOCALVERSION` 再拼一次**。
+于是变成了 `CONFIG_LOCALVERSION` + 环境变量 = 两遍。
+
+**后果**：release 字符串变了 → vermagic 与 ROM 里的厂商模块不匹配 → 模块全部无法加载
+（表现通常是开机卡住 / 黑屏 / 没有 WiFi）。
+
+**解决**：更新到最新代码后重新构建 —— 现在：
+
+- 默认**不设置**任何 release 覆盖，让 `CONFIG_LOCALVERSION_AUTO=y` 自动生成 `-4k-g<commit>`
+- 只有你显式指定 `localversion` 时才会固定 `CONFIG_LOCALVERSION`，并在同时把环境变量 `LOCALVERSION`
+  置为空字符串（既防止重复，也避免被追加一个 `+`）
+- 构建结束时会自动校验 release 字符串里 `-4k` **只出现一次**，不符合就直接让构建失败
+
+### 4.6 容器能起但没网（NAT 模式）
 
 需要 `full` 档。检查：
 ```bash

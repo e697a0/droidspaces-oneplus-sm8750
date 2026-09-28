@@ -100,7 +100,7 @@ jobs:
           OUT_DIR: ${{ github.workspace }}/out-core
           PROFILE: core
           CONFIGURE_ONLY: '1'
-          LOCALVERSION: '-4k-g000000000000'
+          KERNEL_LOCALVERSION: '-4k-g000000000000'
 
       - name: Configure + verify (full)
         run: ./scripts/build-kernel.sh
@@ -109,7 +109,7 @@ jobs:
           OUT_DIR: ${{ github.workspace }}/out-full
           PROFILE: full
           CONFIGURE_ONLY: '1'
-          LOCALVERSION: '-4k-g000000000000'
+          KERNEL_LOCALVERSION: '-4k-g000000000000'
 
       # ---------------- optional bundle: NTSYNC ----------------
       - name: Install optional NTSYNC bundle
@@ -126,7 +126,7 @@ jobs:
           PROFILE: full
           CONFIGURE_ONLY: '1'
           ENABLE_NTSYNC: '1'
-          LOCALVERSION: '-4k-g000000000000'
+          KERNEL_LOCALVERSION: '-4k-g000000000000'
 
       - name: Upload generated .config files
         if: always()
