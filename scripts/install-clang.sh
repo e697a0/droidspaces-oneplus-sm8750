@@ -3,8 +3,11 @@
 #
 # Download and install the AOSP clang used by this kernel tree.
 #
-# The tree's build.config.constants says:  CLANG_VERSION=r510928
-# We therefore default to clang-r510928 but accept any version and any mirror.
+# The tree's build.config.constants still says CLANG_VERSION=r510928, but the
+# stock LineageOS 23.2 kernel actually running on sm8750 was built with
+# clang-r563880c (clang 21) -- see /proc/version on the device.  The
+# verified-working sm8750 reference project pins the same version, so that is
+# our default.  Any version and any mirror can still be selected.
 #
 # Environment:
 #   CLANG_VERSION  e.g. clang-r510928
@@ -12,7 +15,7 @@
 #   CLANG_DEST     install directory (default: $PWD/clang)
 set -euo pipefail
 
-CLANG_VERSION="${CLANG_VERSION:-clang-r510928}"
+CLANG_VERSION="${CLANG_VERSION:-clang-r563880c}"
 CLANG_URL="${CLANG_URL:-}"
 CLANG_DEST="${CLANG_DEST:-$PWD/clang}"
 
@@ -44,10 +47,17 @@ try_url() {
 cands=()
 [ -n "$CLANG_URL" ] && cands+=("$CLANG_URL")
 
-# GitHub-hosted mirror (fast, no googlesource dependency) — only r510928 exists
-if [ "$CLANG_VERSION" = "clang-r510928" ]; then
-    cands+=("https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/clang-r510928.zip")
-fi
+# GitHub-hosted mirrors (fast, and independent of googlesource branch names).
+# Only a few versions are mirrored; anything else falls through to AOSP.
+case "$CLANG_VERSION" in
+    clang-r563880c)
+        cands+=("https://github.com/Draklyfg/oneplus-sm8750-kernel-pro-build/releases/download/toolchain-AOSP-Clang-21.0.0-r563880c/clang-r563880c.tar.gz")
+        cands+=("https://gh-proxy.com/https://github.com/Draklyfg/oneplus-sm8750-kernel-pro-build/releases/download/toolchain-AOSP-Clang-21.0.0-r563880c/clang-r563880c.tar.gz")
+        ;;
+    clang-r510928)
+        cands+=("https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/clang-r510928.zip")
+        ;;
+esac
 
 # Canonical AOSP source.  The branch/version pairs are not guessable, so try all.
 for branch in main-kernel-build-2024 main-kernel-2025 main-kernel-2026 main-kernel; do

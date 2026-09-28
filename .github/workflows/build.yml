@@ -35,9 +35,9 @@ on:
         required: false
         default: 'Droidspaces Kernel (SM8750 / sun)'
       clang_version:
-        description: 'AOSP clang version (must match the kernel tree, see build.config.constants)'
+        description: 'AOSP clang version (r563880c is what the stock sm8750 LineageOS 23.2 kernel was built with)'
         required: true
-        default: 'clang-r510928'
+        default: 'clang-r563880c'
         type: choice
         options:
           - clang-r510928
