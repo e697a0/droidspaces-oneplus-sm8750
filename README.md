@@ -2,6 +2,7 @@
 
 给 **LineageOS/类 LineageOS (Android 15/16)** 的 **一加 SM8750 (Snapdragon 8 Elite)** 设备构建一个**完整支持 Droidspaces 容器**的内核，并用 **GitHub Actions** 编译、打包成 **AnyKernel3** 卡刷包。
 
+> 本项目所有脚本，文档均由ai完成，请谨慎判断。release的内核通过了实机测试，基本功能正常。
 > 本项目**只做增量**：不 fork 内核源码树，每次构建都从上游 `LineageOS/android_kernel_oneplus_sm8750` 取最新代码，只应用必要的 kABI 补丁 + 配置片段。
 > **不需要在本地编译**，所有编译都在 GitHub Actions 上完成。
 
