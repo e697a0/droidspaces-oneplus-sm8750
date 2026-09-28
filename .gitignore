@@ -3,9 +3,20 @@
 /work/
 /dist/
 /clang/
+.ccache/
+
+# never commit credentials or local environment files
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.jks
+*.kdbx
+id_rsa*
+id_ed25519*
 
 # local editor / OS noise
 .DS_Store
 *.swp
 *~
-.ccache/
