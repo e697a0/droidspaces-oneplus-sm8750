@@ -11,6 +11,10 @@
 # NF_CONNTRACK_NETLINK.)
 #
 # usage: check-kconfig-symbols.sh <kernel-dir>
+#
+# Only configs/*.config is checked by default.  Optional fragments live in
+# configs/optional/ and reference symbols that exist only after their bundle
+# has been applied, so they are checked only when ENABLE_NTSYNC=1.
 set -euo pipefail
 
 KERNEL_DIR="${1:-}"
@@ -21,6 +25,13 @@ KERNEL_DIR="${1:-}"
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+config_files=("$PROJECT_DIR"/configs/*.config)
+if [ "${ENABLE_NTSYNC:-0}" = "1" ]; then
+    for f in "$PROJECT_DIR"/configs/optional/*.config; do
+        [ -e "$f" ] && config_files+=("$f")
+    done
+fi
+
 total=0
 missing=0
 while IFS= read -r opt; do
@@ -30,7 +41,7 @@ while IFS= read -r opt; do
         echo "[x] CONFIG_${opt} is not declared in any Kconfig" >&2
         missing=$((missing + 1))
     fi
-done < <(cat "$PROJECT_DIR"/configs/*.config \
+done < <(cat "${config_files[@]}" \
          | grep -oE '^CONFIG_[A-Z0-9_]+' \
          | sed 's/^CONFIG_//' \
          | sort -u)

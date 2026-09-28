@@ -60,7 +60,8 @@
 
 ### 不包含（有意为之）
 
-- **Lindroid / EVDI 虚拟显示**、**NTSYNC**（Wine/Proton 同步原语）—— 属于 Droidspaces 的“扩展”能力，需要额外源码，本项目默认不引入。见 `docs/RESEARCH.md` 中的说明。
+- **NTSYNC**（Wine/Proton 的 Windows 同步原语）—— **已提供，但默认关闭**。它是官方要求清单之外的能力，需要引入约 1000 行新驱动源码；把工作流的 `ntsync` 输入设为 `true` 即可启用（见 [patches/optional/ntsync](patches/optional/ntsync/README.md)）。
+- **Lindroid / EVDI 虚拟显示** —— 需要引入整个 `drivers/gpu/drm/evdi/` 目录，本项目**未包含**。若你需要把 Android 界面投到 Linux 容器里，可以再单独加。
 - **内核本身的功能**（KernelSU / SUSFS / zram 算法 / BBR …）—— 本项目的目标只有一个：Droidspaces。这也正是它比动辄 3 万行补丁的“全能内核”项目更容易维护的原因。
 
 ---
@@ -75,7 +76,9 @@
 ├── configs/
 │   ├── droidspaces-core.config      # 必选（官方 GKI 清单）
 │   ├── droidspaces-containers.config# cgroup / devtmpfs / overlayfs / seccomp
-│   └── droidspaces-network.config   # NAT 模式 + UFW / Fail2ban + nftables
+│   ├── droidspaces-network.config   # NAT 模式 + UFW / Fail2ban + nftables
+│   └── optional/
+│       └── droidspaces-ntsync.config # 可选：只配 ntsync=true 时才使用
 ├── docs/
 │   ├── FLASHING.md                  # 刷机与排错指南（先看这个）
 │   ├── RESEARCH.md                  # 完整调研记录（配置/补丁/构建方式）
@@ -83,6 +86,7 @@
 ├── patches/
 │   ├── 001.droidspaces-sysvipc-kabi.patch   # 唯一必打补丁
 │   ├── alternatives/                # 其他内核版本 / 槽位变体备用
+│   ├── optional/ntsync/             # 可选的 NTSYNC（Wine/Proton）补丁 + 源码
 │   └── README.md                    # 为什么选这个变体
 └── scripts/
     ├── install-clang.sh             # 下载 AOSP clang（多镜像 + 校验）
@@ -90,6 +94,7 @@
     ├── build-kernel.sh              # 合并配置 → olddefconfig → 编译 Image
     ├── verify-config.sh             # 编译前校验配置（秒级失败）
     ├── check-kconfig-symbols.sh     # 校验每个配置项在 Kconfig 中真实存在
+    ├── enable-ntsync.sh             # 可选：把 NTSYNC 驱动装进内核树
     └── package-anykernel.sh         # 打成 AnyKernel3 zip
 ```
 
@@ -110,6 +115,10 @@
 | AnyKernel3 打包 | 用假 Image 跑 `package-anykernel.sh` | zip 结构 / `kernel.string` 注入 / slot 变量正确 |
 | 冒烟测试目标有效 | `make -n kernel/fork.o` 等 3 个目标 | 3/3 被识别，各产生 1 条编译命令 |
 | 厂商模块不会被拒载 | `abi_gki_kmi_symbols` 生成路径分析 | 裸 `make` 下为空 → 走**宽松**路径，模块可访问全部符号 |
+| NTSYNC hook 可应用 | `patch --dry-run` 打 `drivers/misc/{Kconfig,Makefile}` | 干净应用 |
+| NTSYNC 配置生效 | `CONFIGURE_ONLY=1 ENABLE_NTSYNC=1` | 校验 48/48 通过，`.config` 中 `CONFIG_NTSYNC=y` |
+| NTSYNC 目标可编译 | `make -n drivers/misc/ntsync.o` | 目标存在，1 条编译命令 |
+| `enable-ntsync.sh` 幂等 | 连续执行两次 | 第二次跳过 hook，符号不重复 |
 
 > ⚠️ **尚未验证**：真正的编译和刷机。这两步必须在 GitHub Actions 和真机上完成。
 
@@ -187,6 +196,7 @@ git push -u origin main
 | `clang_version` | `clang-r510928` | AOSP clang 版本 |
 | `upload_config` | `true` | 是否额外上传 `Image` 与 `.config` 便于排查 |
 | `use_ccache` | `true` | 用 ccache 缓存目标文件，重复构建会快很多（首次构建基本无收益） |
+| `ntsync` | `false` | **可选**：加入 NTSYNC（跑 Wine / Proton 才需要），详见 [patches/optional/ntsync](patches/optional/ntsync/README.md) |
 
 仓库变量（可选，`Settings → Secrets and variables → Actions → Variables`）：
 

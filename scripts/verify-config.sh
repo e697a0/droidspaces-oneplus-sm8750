@@ -5,10 +5,15 @@
 # Runs before the (long) compile so a config regression costs seconds, not an hour.
 #
 # usage: verify-config.sh <.config> [core|full]
+#
+# Environment:
+#   EXTRA_REQUIRED  space separated symbols that must additionally be =y
+#                   (used for optional add-ons such as NTSYNC)
 set -euo pipefail
 
 CONFIG="${1:?usage: verify-config.sh <.config> [core|full]}"
 PROFILE="${2:-full}"
+EXTRA_REQUIRED="${EXTRA_REQUIRED:-}"
 
 [ -f "$CONFIG" ] || { echo "[x] no such config: $CONFIG" >&2; exit 1; }
 
@@ -67,6 +72,11 @@ full_opts=(
 opts=("${core_opts[@]}")
 if [ "$PROFILE" = "full" ]; then
     opts+=("${full_opts[@]}")
+fi
+if [ -n "$EXTRA_REQUIRED" ]; then
+    # shellcheck disable=SC2206
+    extra=(${EXTRA_REQUIRED})
+    opts+=("${extra[@]}")
 fi
 
 fail=0

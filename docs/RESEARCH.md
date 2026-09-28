@@ -197,7 +197,7 @@ CONFIG_LOCALVERSION="-4k-g$(git rev-parse HEAD | cut -c1-12)"
 
 ---
 
-## 6. Droidspaces “扩展”能力（本项目默认不启用）
+## 6. Droidspaces “扩展”能力
 
 | 能力 | 需要的配置/补丁 | 说明 |
 |---|---|---|
@@ -205,7 +205,7 @@ CONFIG_LOCALVERSION="-4k-g$(git rev-parse HEAD | cut -c1-12)"
 | UFW / Fail2ban | `IP_NF_TARGET_REJECT NETFILTER_XT_TARGET_LOG` `NETFILTER_XT_MATCH_RECENT` `IP_SET` `NETFILTER_XT_SET` | ✅ 本项目 `full` 档已包含 |
 | Docker/Podman/LXC 嵌套 | `NF_TABLES` | ✅ 本项目 `full` 档已包含 |
 | NixOS | `TMPFS_POSIX_ACL` `TMPFS_XATTR` | ✅ 已包含 |
-| **NTSYNC**（Wine/Proton 同步原语） | `drivers/misc/ntsync.c`（约 1700 行新源码）+ `CONFIG_NTSYNC` | ❌ 需要引入新源码 |
+| **NTSYNC**（Wine/Proton 同步原语） | `patches/optional/ntsync/`（约 1000 行新源码）+ `CONFIG_NTSYNC=y` | ✅ **已提供，默认关闭**；工作流 `ntsync=true` 启用 |
 | **Lindroid / EVDI 虚拟显示** | `drivers/gpu/drm/evdi/`（新源码）+ `CONFIG_DRM_LINDROID_EVDI` | ❌ 需要引入新源码 |
 
 参考项目把这两项打包成 `05_droidspaces.patch`（含 `patches/extra/` 里的新源码）。
@@ -325,6 +325,42 @@ static const char gki_unprotected_symbols[][MAX_UNPROTECTED_NAME_LEN] = {
 
 另外 `CONFIG_MODULE_SIG_FORCE` **没有**开启，即使签名校验不通过也只是 taint，不会拒载。
 结论：ROM 里 500+ 个厂商 `.ko` 不会因为符号保护或签名被拦下。
+### 9.5 可选的 NTSYNC 扩展
+
+NTSYNC 是官方 Droidspaces 要求清单**之外**的能力，只有要在容器里跑 Windows 软件
+（Wine / Proton / Steam）时才需要。它无法只靠配置片段实现 —— 驱动是**新文件**，还要往
+`drivers/misc/{Kconfig,Makefile}` 加 hook。所以做成一个独立 bundle：
+
+```
+patches/optional/ntsync/
+├── 0001-ntsync-hooks.patch          # 从参考项目的 05_droidspaces.patch 中精确提取
+└── files/
+    ├── drivers/misc/ntsync.c        # 28812 字节
+    └── include/uapi/linux/ntsync.h  # 1614 字节
+```
+
+由 `scripts/enable-ntsync.sh` 安装（具备幂等性：第二次运行会跳过 hook）。
+
+### 为什么必须 `=y` 而不是 `=m`
+
+本项目只刷 `boot` 分区里的内核 Image，**不动 `vendor_dlkm` / `system_dlkm`**。
+如果 `CONFIG_NTSYNC=m`，新驱动会被编进模块分区，而那个分区根本没被替换
+→ 容器里 `/dev/ntsync` 不会出现。所以 `configs/optional/droidspaces-ntsync.config` 写死 `CONFIG_NTSYNC=y`。
+（参考项目同样用 `=y`。）
+
+### 版本兼容
+
+`ntsync.c` 内建了内核版本分支：
+
+```c
+ 30: #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+1218: #if LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0)
+1220: #elif LINUX_VERSION_CODE < KERNEL_VERSION(6,3,0)
+```
+
+适配版本来自同平台参考项目（同一棵 LineageOS 23.2 / SM8750 树，实机验证过）。
+本项目额外把 `drivers/misc/ntsync.o` 加入 CI 冒烟测试目标 —— 一旦它编译不过，
+5 分钟内就会失败，而不是等完整构建跑完。
 
 ---
 
@@ -349,5 +385,9 @@ static const char gki_unprotected_symbols[][MAX_UNPROTECTED_NAME_LEN] = {
 | 13 | 冒烟测试目标 | `make -n kernel/fork.o` 等 3 个 | 3/3 被识别，各 1 条编译命令 |
 | 14 | GKI 模块保护 | 生成 `gki_module_{unprotected,protected_exports}.h` | 合法 C；未保护列表为空 → 宽松路径 |
 | 15 | 冒烟 + 配置 CI 流程 | `build-kernel.sh` 的 `CONFIGURE_ONLY` / `SMOKE_ONLY` | 两种模式语法与目标均验证 |
+| 16 | NTSYNC hook | `patch --dry-run drivers/misc/{Kconfig,Makefile}` | 干净应用 |
+| 17 | NTSYNC 配置生效 | `CONFIGURE_ONLY=1 ENABLE_NTSYNC=1` | 校验 **48/48**，`.config` 中 `CONFIG_NTSYNC=y` |
+| 18 | NTSYNC 可编译目标 | `make -n drivers/misc/ntsync.o` | 目标存在，1 条编译命令 |
+| 19 | `enable-ntsync.sh` 幂等 | 连续两次 | 第二次跳过 hook，Kconfig/Makefile 各 1 处 |
 
 **未验证**：真实编译（需要 GitHub Actions 的 x86_64 环境，约 1 小时）与真机刷入。

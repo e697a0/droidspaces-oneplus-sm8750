@@ -54,6 +54,11 @@ on:
         required: false
         default: true
         type: boolean
+      ntsync:
+        description: 'OPTIONAL: add NTSYNC (needed only for Wine/Proton inside containers)'
+        required: false
+        default: false
+        type: boolean
 
   push:
     tags:
@@ -90,6 +95,7 @@ jobs:
           IN_NAME: ${{ inputs.kernel_name }}
           IN_UPLOAD: ${{ inputs.upload_config }}
           IN_CCACHE: ${{ inputs.use_ccache }}
+          IN_NTSYNC: ${{ inputs.ntsync }}
         run: |
           set -eu
           BRANCH="${IN_BRANCH:-lineage-23.2}"
@@ -98,6 +104,11 @@ jobs:
           KERNEL_NAME="${IN_NAME:-Droidspaces Kernel (SM8750 / sun)}"
           UPLOAD_CONFIG="${IN_UPLOAD:-true}"
           USE_CCACHE="${IN_CCACHE:-true}"
+          ENABLE_NTSYNC="${IN_NTSYNC:-false}"
+          case "$ENABLE_NTSYNC" in
+            true|1|yes) ENABLE_NTSYNC=1 ;;
+            *)          ENABLE_NTSYNC=0 ;;
+          esac
           REPO_BASE="${{ vars.REPO_BASE }}"
           REPO_BASE="${REPO_BASE:-https://github.com}"
 
@@ -113,6 +124,7 @@ jobs:
             echo "KERNEL_NAME=$KERNEL_NAME"
             echo "UPLOAD_CONFIG=$UPLOAD_CONFIG"
             echo "USE_CCACHE=$USE_CCACHE"
+            echo "ENABLE_NTSYNC=$ENABLE_NTSYNC"
             echo "REPO_BASE=$REPO_BASE"
             echo "AK3_NAME=Droidspaces-SM8750-${BRANCH}-${PROFILE}.zip"
           } >> "$GITHUB_ENV"
@@ -126,6 +138,7 @@ jobs:
             echo "| profile | \`$PROFILE\` |"
             echo "| clang | \`$CLANG_VERSION\` |"
             echo "| ccache | \`$USE_CCACHE\` |"
+            echo "| ntsync (optional) | \`$ENABLE_NTSYNC\` |"
             echo "| source mirror | \`$REPO_BASE\` |"
             echo "| runner | \`$RUNNER_OS/$RUNNER_ARCH\` |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -164,6 +177,10 @@ jobs:
           grep -q '_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(7); ANDROID_KABI_RESERVE(8), struct sysv_shm sysvshm);' include/linux/sched.h
           echo "[+] kABI patch applied and verified"
 
+      - name: Enable NTSYNC (optional)
+        if: env.ENABLE_NTSYNC == '1'
+        run: ./scripts/enable-ntsync.sh "${{ github.workspace }}/work/src"
+
       - name: Resolve kernel release string
         run: |
           set -eu
@@ -198,6 +215,7 @@ jobs:
           KERNEL_DIR: ${{ github.workspace }}/work/src
           OUT_DIR: ${{ github.workspace }}/out-validate
           CONFIGURE_ONLY: '1'
+          ENABLE_NTSYNC: ${{ env.ENABLE_NTSYNC }}
 
       - name: Install AOSP clang
         run: ./scripts/install-clang.sh
@@ -240,6 +258,7 @@ jobs:
           KERNEL_DIR: ${{ github.workspace }}/work/src
           OUT_DIR: ${{ github.workspace }}/out
           SMOKE_ONLY: '1'
+          ENABLE_NTSYNC: ${{ env.ENABLE_NTSYNC }}
           CC: ${{ env.USE_CCACHE != 'false' && 'ccache clang' || 'clang' }}
 
       - name: Build kernel Image
@@ -247,6 +266,7 @@ jobs:
         env:
           KERNEL_DIR: ${{ github.workspace }}/work/src
           OUT_DIR: ${{ github.workspace }}/out
+          ENABLE_NTSYNC: ${{ env.ENABLE_NTSYNC }}
           CC: ${{ env.USE_CCACHE != 'false' && 'ccache clang' || 'clang' }}
 
       - name: ccache stats

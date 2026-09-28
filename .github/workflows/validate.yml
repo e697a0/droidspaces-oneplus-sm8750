@@ -87,7 +87,7 @@ jobs:
           echo "[+] patch applied"
 
       - name: Every config symbol must exist in Kconfig
-        run: ./scripts/check-kconfig-symbols.sh "${{ github.workspace }}/work/src"
+        run: bash ./scripts/check-kconfig-symbols.sh "${{ github.workspace }}/work/src"
 
       - name: Configure + verify (core)
         run: ./scripts/build-kernel.sh
@@ -107,6 +107,23 @@ jobs:
           CONFIGURE_ONLY: '1'
           LOCALVERSION: '-4k-g000000000000'
 
+      # ---------------- optional bundle: NTSYNC ----------------
+      - name: Install optional NTSYNC bundle
+        run: ./scripts/enable-ntsync.sh "${{ github.workspace }}/work/src"
+
+      - name: Config symbols incl. optional NTSYNC
+        run: ENABLE_NTSYNC=1 bash ./scripts/check-kconfig-symbols.sh "${{ github.workspace }}/work/src"
+
+      - name: Configure + verify (full + NTSYNC)
+        run: ./scripts/build-kernel.sh
+        env:
+          KERNEL_DIR: ${{ github.workspace }}/work/src
+          OUT_DIR: ${{ github.workspace }}/out-ntsync
+          PROFILE: full
+          CONFIGURE_ONLY: '1'
+          ENABLE_NTSYNC: '1'
+          LOCALVERSION: '-4k-g000000000000'
+
       - name: Upload generated .config files
         if: always()
         uses: actions/upload-artifact@v4
@@ -115,4 +132,5 @@ jobs:
           path: |
             out-core/.config
             out-full/.config
+            out-ntsync/.config
           if-no-files-found: warn

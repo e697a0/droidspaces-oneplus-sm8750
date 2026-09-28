@@ -15,6 +15,8 @@
 #                  (used by CI so a config regression fails in minutes)
 #   SMOKE_ONLY    1 = compile a handful of representative objects and stop
 #                  (catches toolchain problems in ~5 min instead of ~1 h)
+#   ENABLE_NTSYNC 1 = also apply the optional NTSYNC bundle to the config,
+#                  the verification list and the smoke-test objects
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,6 +29,7 @@ JOBS="${JOBS:-$(nproc --all)}"
 EXTRA_MAKE="${EXTRA_MAKE:-}"
 CONFIGURE_ONLY="${CONFIGURE_ONLY:-0}"
 SMOKE_ONLY="${SMOKE_ONLY:-0}"
+ENABLE_NTSYNC="${ENABLE_NTSYNC:-0}"
 CC="${CC:-clang}"
 
 [ -d "$KERNEL_DIR" ] || { echo "[x] KERNEL_DIR not found: $KERNEL_DIR" >&2; exit 1; }
@@ -45,6 +48,17 @@ case "$PROFILE" in
         ;;
     *) echo "[x] unknown PROFILE '$PROFILE' (use core|full)" >&2; exit 1 ;;
 esac
+
+EXTRA_REQUIRED=""
+if [ "$ENABLE_NTSYNC" = "1" ]; then
+    # Optional add-on; scripts/enable-ntsync.sh must already have installed the
+    # driver and the Kconfig/Makefile hooks, otherwise merge_config.sh silently
+    # drops CONFIG_NTSYNC and verify-config.sh fails.
+    frags+=("$PROJECT_DIR/configs/optional/droidspaces-ntsync.config")
+    EXTRA_REQUIRED="NTSYNC"
+    echo "[i] NTSYNC add-on enabled"
+fi
+export EXTRA_REQUIRED
 
 cd "$KERNEL_DIR"
 mkdir -p "$OUT_DIR"
@@ -84,6 +98,10 @@ if [ "$SMOKE_ONLY" = "1" ]; then
         net/netfilter/nf_tables_api.o
         net/netfilter/ipset/ip_set_core.o
     )
+    if [ "$ENABLE_NTSYNC" = "1" ]; then
+        # Validates the vendored NTSYNC driver on CI before the long build.
+        smoke_objs+=(drivers/misc/ntsync.o)
+    fi
     echo "[*] SMOKE_ONLY=1 - compiling ${#smoke_objs[@]} representative objects"
     # shellcheck disable=SC2086
     make -j"$JOBS" O="$OUT_DIR" ARCH=arm64 \
