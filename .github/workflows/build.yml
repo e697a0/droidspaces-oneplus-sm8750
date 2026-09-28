@@ -138,6 +138,7 @@ jobs:
             echo "ENABLE_NTSYNC=$ENABLE_NTSYNC"
             echo "DEVICE_CHECK=$DEVICE_CHECK"
             echo "REPO_BASE=$REPO_BASE"
+            echo "AK3_BASE=Droidspaces-SM8750-${BRANCH}-${PROFILE}"
             echo "AK3_NAME=Droidspaces-SM8750-${BRANCH}-${PROFILE}.zip"
           } >> "$GITHUB_ENV"
 
@@ -305,11 +306,18 @@ jobs:
             echo "zip_sha256=$(sha256sum "dist/$AK3_NAME" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           }
 
-      - name: Upload flashable zip
+      # NOTE: GitHub always re-zips artifacts (upload-artifact has no
+      # "no archive" option), so this download is a container that holds the
+      # real flashable zip.  The artifact name deliberately differs from the
+      # zip inside it to make that obvious.  For a directly flashable file use
+      # the "latest" release (see the step below).
+      - name: Upload flashable zip as an artifact container
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.package.outputs.ak3 }}
-          path: dist/${{ steps.package.outputs.ak3 }}
+          name: ${{ env.AK3_BASE }}-artifact
+          path: |
+            dist/${{ env.AK3_NAME }}
+            dist/${{ env.AK3_NAME }}.sha256
           if-no-files-found: error
           compression-level: 0
 
@@ -322,8 +330,31 @@ jobs:
             out/arch/arm64/boot/Image
             out/.config
             dist/zip-contents.txt
+            dist/${{ env.AK3_NAME }}.sha256
           if-no-files-found: warn
           compression-level: 0
+
+      - name: Publish raw flashable zip to the rolling "latest" release
+        # A release asset is the raw file: no extra zip layer, resumable
+        # download, and a stable URL.  This is what you should flash.
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          if ! gh release view latest >/dev/null 2>&1; then
+            gh release create latest \
+              --title "Latest Droidspaces build" \
+              --notes "Rolling release holding the most recent Droidspaces kernel for OnePlus SM8750 (sun)." \
+              --prerelease
+          fi
+          gh release upload latest "dist/$AK3_NAME" "dist/$AK3_NAME.sha256" --clobber
+          {
+            echo ""
+            echo "### Direct download - raw flashable zip"
+            echo ""
+            echo "https://github.com/${{ github.repository }}/releases/download/latest/$AK3_NAME"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summary
         if: always()
@@ -344,7 +375,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${{ github.ref_name }}" \
-            "dist/$AK3_NAME" \
+            "dist/$AK3_NAME" "dist/$AK3_NAME.sha256" \
             --title "${{ github.ref_name }}" \
             --notes "Droidspaces kernel for OnePlus SM8750 (sun)
 

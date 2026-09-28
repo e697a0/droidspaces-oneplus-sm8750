@@ -37,6 +37,56 @@ uname -r
 
 ## 2. 刷入
 
+### 2.0 ⚠️ 先确认你拿到的是「真正的卡刷包」
+
+从 GitHub Actions **Artifacts** 下载到的文件**不能直接刷** —— 平台一定会再套一层 zip
+（`upload-artifact` 没有「不打包」的选项，这是 GitHub 的行为，不是打包脚本的问题）：
+
+```
+Droidspaces-SM8750-lineage-23.2-full-artifact.zip   ← Artifacts 下到的「外层容器」
+└── Droidspaces-SM8750-lineage-23.2-full.zip        ← 这才是卡刷包
+    ├── Image
+    ├── anykernel.sh
+    └── META-INF/...
+```
+
+**推荐直接去 Releases 下**，那里是原始文件、没有外壳、还支持断点续传：
+
+```
+仓库 → Releases → Latest Droidspaces build（tag 为 latest，标记 Pre-release）
+   → 下载 Droidspaces-SM8750-lineage-23.2-full.zip
+```
+
+直链形式：
+
+```
+https://github.com/<你的用户名>/<仓库名>/releases/download/latest/Droidspaces-SM8750-lineage-23.2-full.zip
+```
+
+### 2.0.1 校验（强烈建议，尤其网络不稳时）
+
+每个包都附带一个 `.sha256` 文件。手机 Termux 里：
+
+```bash
+cd /sdcard/Download
+
+# ① 整包校验：确认下载没有被截断/改坏
+sha256sum -c Droidspaces-SM8750-lineage-23.2-full.zip.sha256
+# 期望输出：Droidspaces-SM8750-lineage-23.2-full.zip: OK
+
+# ② 内部校验：确认 zip 里每个条目（尤其 Image）都完好
+unzip -t Droidspaces-SM8750-lineage-23.2-full.zip
+# 期望输出：No errors detected in compressed data of ...
+```
+
+如果 ① 失败 → 是**下载不完整**，重下即可（Release 支持断点续传，比 Artifacts 稳）。
+如果 ① 通过但 ② 失败 → 把 `unzip -t` 的完整输出发我。
+
+> **不要用 MT 管理器「在压缩包里直接浏览再解压」**（zip 套 zip 的嵌套浏览）。
+> 要么先解外层再刷内层，要么直接用 2.0 里的 Release 直链，绕开这层麻烦。
+
+### 2.1 刷入方式
+
 三种方式任选：
 
 ### A. KernelSU / APatch / Magisk 管理器（推荐）

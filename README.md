@@ -182,8 +182,27 @@ git push -u origin main
 
 ### 4. 下载并刷入
 
-构建完成后在 Artifacts 里下载 `Droidspaces-SM8750-lineage-23.2-full.zip`，
-在 **KernelSU / Magisk 管理器**或 **TWRP/OrangeFox** 里刷入，然后重启。
+构建完成后有**两条下载路径**，别下错：
+
+| 路径 | 拿到的是什么 | 能不能直接刷 |
+|---|---|---|
+| **Releases → `latest`**（推荐） | **原始卡刷包** `Droidspaces-SM8750-lineage-23.2-full.zip` | ✅ 直接刷，且支持断点续传 |
+| **Artifacts** | `Droidspaces-SM8750-lineage-23.2-full-artifact.zip` —— **外层容器** | ❌ 必须先解一层，里面那个同名 `.zip` 才是卡刷包 |
+
+> GitHub 的 **Artifacts 一定是嵌套的** —— `upload-artifact` 没有「不打包」的选项，
+> 平台会自动再压一层。所以推荐用 **Releases**：release asset 是原始文件，不多套壳。
+
+拿到卡刷包后，在 **KernelSU / Magisk 管理器**或 **TWRP/OrangeFox** 里刷入，然后重启。
+
+刷之前建议先校验（手机上用 Termux 就行）：
+
+```bash
+cd /sdcard/Download          # 或你放 zip 的目录
+# 1) 校验整包是不是下载完整
+sha256sum -c Droidspaces-SM8750-lineage-23.2-full.zip.sha256
+# 2) 校验 zip 内部有没有损坏
+unzip -t Droidspaces-SM8750-lineage-23.2-full.zip
+```
 
 详细步骤和排错见 **[docs/FLASHING.md](docs/FLASHING.md)**。
 

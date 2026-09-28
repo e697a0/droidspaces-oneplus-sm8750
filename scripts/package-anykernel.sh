@@ -62,5 +62,26 @@ mkdir -p "$(dirname "$OUT_ZIP")"
 rm -f "$OUT_ZIP"
 ( cd "$WORK/ak3" && zip -r9 "$OUT_ZIP" . -x '*.git*' >/dev/null )
 
+# --- verify the archive we just produced ------------------------------------
+# Never ship a zip we have not read back.  A corrupt Image entry inside an
+# otherwise normal-looking zip is exactly what makes a package fail on the
+# device with errors such as "invalid stored block lengths".
+unzip -t "$OUT_ZIP" >/dev/null 2>&1 || {
+    echo "[x] the archive we just created fails unzip -t" >&2
+    exit 1
+}
+SRC_SHA="$(sha256sum "$IMAGE" | cut -d' ' -f1)"
+ZIP_SHA="$(unzip -p "$OUT_ZIP" Image | sha256sum | cut -d' ' -f1)"
+if [ "$SRC_SHA" != "$ZIP_SHA" ]; then
+    echo "[x] Image inside the zip differs from the source file" >&2
+    echo "    source: $SRC_SHA" >&2
+    echo "    in zip: $ZIP_SHA" >&2
+    exit 1
+fi
+
+# Sidecar checksum so the download can be verified on the phone.
+printf '%s  %s\n' "$(sha256sum "$OUT_ZIP" | cut -d' ' -f1)" "$(basename "$OUT_ZIP")" > "$OUT_ZIP.sha256"
+
 echo "[+] wrote $OUT_ZIP ($(du -h "$OUT_ZIP" | cut -f1))"
+echo "[+] verified: unzip -t clean, Image sha256 $SRC_SHA"
 unzip -l "$OUT_ZIP" | grep -E 'Image|anykernel.sh|META-INF' || true
