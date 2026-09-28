@@ -1,0 +1,11 @@
+# build output
+/out/
+/work/
+/dist/
+/clang/
+
+# local editor / OS noise
+.DS_Store
+*.swp
+*~
+.ccache/

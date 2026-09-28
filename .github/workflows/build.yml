@@ -1,0 +1,189 @@
+name: Build Droidspaces Kernel (OnePlus SM8750)
+
+# Builds the LineageOS android_kernel_oneplus_sm8750 kernel with full Droidspaces
+# support and packages it as an AnyKernel3 flashable zip.
+#
+# Nothing is built on the caller's machine - everything happens on the runner.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: 'LineageOS kernel branch to build'
+        required: true
+        default: 'lineage-23.2'
+        type: choice
+        options:
+          - lineage-23.2
+          - lineage-23.1
+          - lineage-23.0
+          - lineage-22.2
+      profile:
+        description: 'Droidspaces config profile (full = NAT/UFW/Fail2ban/cgroups too)'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - core
+      localversion:
+        description: 'Override kernel release suffix (e.g. -4k-gedc821586bcb). Empty = auto from the branch commit.'
+        required: false
+        default: ''
+      kernel_name:
+        description: 'Name shown in the installer'
+        required: false
+        default: 'Droidspaces Kernel (SM8750 / sun)'
+      clang_version:
+        description: 'AOSP clang version (must match the kernel tree, see build.config.constants)'
+        required: true
+        default: 'clang-r510928'
+        type: choice
+        options:
+          - clang-r510928
+          - clang-r547379
+          - clang-r563880c
+          - clang-r584948
+      upload_config:
+        description: 'Also upload the .config and Image for debugging'
+        required: false
+        default: true
+        type: boolean
+
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  KERNEL_BRANCH: ${{ inputs.kernel_branch || 'lineage-23.2' }}
+  PROFILE: ${{ inputs.profile || 'full' }}
+  CLANG_VERSION: ${{ inputs.clang_version || 'clang-r510928' }}
+  KERNEL_NAME: ${{ inputs.kernel_name || 'Droidspaces Kernel (SM8750 / sun)' }}
+  REPO_BASE: ${{ vars.REPO_BASE || 'https://github.com' }}
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android \
+                      /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev libncurses-dev \
+            zip unzip xz-utils zstd python3 curl git make gcc g++ \
+            ca-certificates patch cpio rsync kmod dwarves device-tree-compiler
+          nproc --all
+          df -h /
+
+      - name: Install AOSP clang
+        run: ./scripts/install-clang.sh
+        env:
+          CLANG_URL: ${{ vars.CLANG_URL }}
+
+      - name: Fetch kernel sources (kernel + modules + devicetrees)
+        run: ./scripts/prepare-sources.sh
+        env:
+          WORK_DIR: ${{ github.workspace }}/work
+
+      - name: Apply Droidspaces kABI patch
+        working-directory: work/src
+        run: |
+          set -e
+          patch -p1 --batch -f < "$GITHUB_WORKSPACE/patches/001.droidspaces-sysvipc-kabi.patch"
+          # Hard guarantee that the ABI-preserving hunk really landed.
+          grep -q 'ANDROID_KABI_USE(6, struct sysv_sem sysvsem);' include/linux/sched.h
+          grep -q '_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(7); ANDROID_KABI_RESERVE(8), struct sysv_shm sysvshm);' include/linux/sched.h
+          echo "[+] kABI patch applied and verified"
+
+      - name: Resolve kernel release string
+        id: rel
+        run: |
+          set -e
+          if [ -n "${{ inputs.localversion }}" ]; then
+            LV="${{ inputs.localversion }}"
+            echo "[i] using user supplied release suffix"
+          else
+            SHA="$(git -C work/src rev-parse HEAD | cut -c1-12)"
+            LV="-4k-g${SHA}"
+            echo "[i] derived from branch commit $SHA"
+          fi
+          echo "localversion=$LV" >> "$GITHUB_OUTPUT"
+          echo "release suffix: $LV"
+          echo "This must match the ROM's kernel release so that the stock"
+          echo "vendor_dlkm modules keep loading (check with: uname -r)"
+
+      - name: Build kernel Image
+        run: ./scripts/build-kernel.sh
+        env:
+          KERNEL_DIR: ${{ github.workspace }}/work/src
+          OUT_DIR: ${{ github.workspace }}/out
+          LOCALVERSION: ${{ steps.rel.outputs.localversion }}
+
+      - name: Package AnyKernel3 zip
+        id: package
+        run: |
+          set -e
+          AK3="Droidspaces-SM8750-${{ env.KERNEL_BRANCH }}-${{ env.PROFILE }}.zip"
+          mkdir -p dist
+          ./scripts/package-anykernel.sh \
+            "$GITHUB_WORKSPACE/out/arch/arm64/boot/Image" \
+            "$GITHUB_WORKSPACE/dist/$AK3" \
+            "${{ env.KERNEL_NAME }}"
+          ls -l dist/
+          echo "ak3=$AK3" >> "$GITHUB_OUTPUT"
+          unzip -l "dist/$AK3" > dist/zip-contents.txt || true
+
+      - name: Upload flashable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.ak3 }}
+          path: dist/${{ steps.package.outputs.ak3 }}
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload Image, .config and zip listing
+        if: ${{ inputs.upload_config != false }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-image-and-config
+          path: |
+            out/arch/arm64/boot/Image
+            out/.config
+            dist/zip-contents.txt
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Create release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            "dist/${{ steps.package.outputs.ak3 }}" \
+            --title "${{ github.ref_name }}" \
+            --notes "Droidspaces kernel for OnePlus SM8750 (sun)
+
+          * branch: ${{ env.KERNEL_BRANCH }}
+          * profile: ${{ env.PROFILE }}
+          * release string: ${{ steps.rel.outputs.localversion }}
+          * clang: ${{ env.CLANG_VERSION }}" \
+            || true
