@@ -54,11 +54,14 @@ clone "$DEVICETREES_REPO" sm8750-devicetrees
 echo "[*] checking external symlinks..."
 bad=0
 while IFS= read -r link; do
-    if [ ! -e "$link" ]; then
-        echo "[x] dangling symlink: $link -> $(readlink "$link")" >&2
-        bad=1
-    fi
-done < <(find src -xtype l 2>/dev/null | grep -E 'sm8750-(modules|devicetrees)' || true)
+    tgt="$(readlink "$link" 2>/dev/null || true)"
+    case "$tgt" in
+        *sm8750-modules*|*sm8750-devicetrees*)
+            echo "[x] dangling symlink: $link -> $tgt" >&2
+            bad=1
+            ;;
+    esac
+done < <(find src -xtype l 2>/dev/null)
 
 if [ "$bad" -ne 0 ]; then
     echo "[x] companion trees are incomplete" >&2
