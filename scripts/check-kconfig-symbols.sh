@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: GPL-2.0
 #
 # Verify that every CONFIG_ symbol used by configs/*.config is actually
-# declared in the kernel's Kconfig files.
+# declared in the kernel Kconfig files.
 #
 # This catches a subtle failure mode: merge_config.sh silently drops symbols it
-# does not know, and `make olddefconfig` then simply never sets them — the build
-# succeeds but Droidspaces support is missing.  (The upstream Droidspaces guide
-# already contains two such stale names for 6.6: NETFILTER_XT_TARGET_REJECT and
-# NF_CONNTRACK_NETLINK.)
+# does not know, and "make olddefconfig" then simply never sets them - the
+# build succeeds but Droidspaces support is missing.  (The upstream Droidspaces
+# guide already contains two such stale names for 6.6: NETFILTER_XT_TARGET_REJECT
+# and NF_CONNTRACK_NETLINK.)
 #
 # usage: check-kconfig-symbols.sh <kernel-dir>
 #
@@ -32,12 +32,22 @@ if [ "${ENABLE_NTSYNC:-0}" = "1" ]; then
     done
 fi
 
+# Collect every declared Kconfig symbol in ONE pass over the tree, instead of
+# running a full-tree grep once per symbol.
+declared="$(mktemp)"
+trap 'rm -f "$declared"' EXIT
+# -r (not -R): this tree is full of directory symlinks; following them would
+# loop and would also scan the companion sm8750-modules tree.
+grep -rhoE '^(menu)?config [A-Za-z0-9_]+' --include='Kconfig*' "$KERNEL_DIR" 2>/dev/null \
+    | sed -E 's/^(menu)?config //' \
+    | sort -u > "$declared"
+
 total=0
 missing=0
 while IFS= read -r opt; do
     [ -n "$opt" ] || continue
     total=$((total + 1))
-    if ! grep -rqE "^(menu)?config ${opt}\$" --include='Kconfig*' "$KERNEL_DIR" 2>/dev/null; then
+    if ! grep -qxF "$opt" "$declared"; then
         echo "[x] CONFIG_${opt} is not declared in any Kconfig" >&2
         missing=$((missing + 1))
     fi
@@ -47,7 +57,7 @@ done < <(cat "${config_files[@]}" \
          | sort -u)
 
 if [ "$missing" -ne 0 ]; then
-    echo "[x] $missing of $total symbols are unknown — fix configs/*.config" >&2
+    echo "[x] $missing of $total symbols are unknown - fix configs/*.config" >&2
     exit 1
 fi
 echo "[+] all $total config symbols are declared in Kconfig"

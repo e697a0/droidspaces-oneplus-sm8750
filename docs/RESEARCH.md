@@ -389,5 +389,9 @@ patches/optional/ntsync/
 | 17 | NTSYNC 配置生效 | `CONFIGURE_ONLY=1 ENABLE_NTSYNC=1` | 校验 **48/48**，`.config` 中 `CONFIG_NTSYNC=y` |
 | 18 | NTSYNC 可编译目标 | `make -n drivers/misc/ntsync.o` | 目标存在，1 条编译命令 |
 | 19 | `enable-ntsync.sh` 幂等 | 连续两次 | 第二次跳过 hook，Kconfig/Makefile 各 1 处 |
+| 20 | 打包注入安全 | 内核名用 `A&B\|C\D` | 原样注入，`unzip -t` 通过 |
+| 21 | 安装器白名单可关闭 | `AK3_DEVICECHECK=0` | `anykernel.sh` 中 `do.devicecheck=0` |
+| 22 | shell 反引号审计 | 全仓库扫描未转义的反引号 | 修复 1 处会触发命令替换的位置 |
+| 23 | 符号检查性能 | 全树扫描次数 | **64 → 1 次**（20241 符号 / 1778 Kconfig，0.6s） |
 
 **未验证**：真实编译（需要 GitHub Actions 的 x86_64 环境，约 1 小时）与真机刷入。

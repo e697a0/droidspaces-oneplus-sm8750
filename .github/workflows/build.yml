@@ -59,6 +59,11 @@ on:
         required: false
         default: false
         type: boolean
+      device_check:
+        description: 'Installer device whitelist (disable only if your codename is not dodge/erhai/hummer/ktm)'
+        required: false
+        default: true
+        type: boolean
 
   push:
     tags:
@@ -96,6 +101,7 @@ jobs:
           IN_UPLOAD: ${{ inputs.upload_config }}
           IN_CCACHE: ${{ inputs.use_ccache }}
           IN_NTSYNC: ${{ inputs.ntsync }}
+          IN_DEVCHK: ${{ inputs.device_check }}
         run: |
           set -eu
           BRANCH="${IN_BRANCH:-lineage-23.2}"
@@ -108,6 +114,11 @@ jobs:
           case "$ENABLE_NTSYNC" in
             true|1|yes) ENABLE_NTSYNC=1 ;;
             *)          ENABLE_NTSYNC=0 ;;
+          esac
+          DEVICE_CHECK="${IN_DEVCHK:-true}"
+          case "$DEVICE_CHECK" in
+            true|1|yes) DEVICE_CHECK=1 ;;
+            *)          DEVICE_CHECK=0 ;;
           esac
           REPO_BASE="${{ vars.REPO_BASE }}"
           REPO_BASE="${REPO_BASE:-https://github.com}"
@@ -125,6 +136,7 @@ jobs:
             echo "UPLOAD_CONFIG=$UPLOAD_CONFIG"
             echo "USE_CCACHE=$USE_CCACHE"
             echo "ENABLE_NTSYNC=$ENABLE_NTSYNC"
+            echo "DEVICE_CHECK=$DEVICE_CHECK"
             echo "REPO_BASE=$REPO_BASE"
             echo "AK3_NAME=Droidspaces-SM8750-${BRANCH}-${PROFILE}.zip"
           } >> "$GITHUB_ENV"
@@ -139,6 +151,7 @@ jobs:
             echo "| clang | \`$CLANG_VERSION\` |"
             echo "| ccache | \`$USE_CCACHE\` |"
             echo "| ntsync (optional) | \`$ENABLE_NTSYNC\` |"
+            echo "| installer device check | \`$DEVICE_CHECK\` |"
             echo "| source mirror | \`$REPO_BASE\` |"
             echo "| runner | \`$RUNNER_OS/$RUNNER_ARCH\` |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -198,7 +211,7 @@ jobs:
             echo ""
             echo "Kernel release suffix: \`$LV\`"
             echo ""
-            echo "> This must match the ROM kernel release (`uname -r`) or the stock"
+            echo "> This must match the ROM kernel release (\`uname -r\`) or the stock"
             echo "> vendor_dlkm modules will refuse to load."
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -275,6 +288,8 @@ jobs:
 
       - name: Package AnyKernel3 zip
         id: package
+        env:
+          AK3_DEVICECHECK: ${{ env.DEVICE_CHECK }}
         run: |
           set -e
           mkdir -p dist

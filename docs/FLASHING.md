@@ -61,6 +61,10 @@ fastboot flash boot boot.img
 
 > ⚠️ 这些设备是 **A/B 分区**，AnyKernel3 会自动识别当前 slot。不要手动 `fastboot flash boot_a` 去猜。
 
+> ⚠️ 安装器带**机型白名单**（`dodge` / `erhai` / `hummer` / `ktm`）。如果安装时提示机型不匹配，说明你的设备代号不在列表里 ——
+> 把工作流的 **`device_check` 设为 `false`** 重新构建，或直接在 `anykernel/anykernel.sh` 里补一行 `device.name5=<你的代号>`。
+> 请不要在非 SM8750 机型上强行安装。
+
 刷完后**重启**。
 
 ---

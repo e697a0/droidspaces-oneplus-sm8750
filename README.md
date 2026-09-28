@@ -119,6 +119,10 @@
 | NTSYNC 配置生效 | `CONFIGURE_ONLY=1 ENABLE_NTSYNC=1` | 校验 48/48 通过，`.config` 中 `CONFIG_NTSYNC=y` |
 | NTSYNC 目标可编译 | `make -n drivers/misc/ntsync.o` | 目标存在，1 条编译命令 |
 | `enable-ntsync.sh` 幂等 | 连续执行两次 | 第二次跳过 hook，符号不重复 |
+| 打包注入安全 | 用 `A&B\|C\D` 作为内核名打包 | 原样注入，无 sed 语法破坏 |
+| `AK3_DEVICECHECK=0` | 打包后检查 `anykernel.sh` | `do.devicecheck=0`，zip 完整性 OK |
+| shell 反引号审计 | 扫描全部脚本与工作流 | 修掉 1 处会触发命令替换的反引号 |
+| 符号检查性能 | 全树扫描次数 | 从 64 次降到 **1 次**（20241 个符号 / 1778 个 Kconfig） |
 
 > ⚠️ **尚未验证**：真正的编译和刷机。这两步必须在 GitHub Actions 和真机上完成。
 
@@ -197,6 +201,7 @@ git push -u origin main
 | `upload_config` | `true` | 是否额外上传 `Image` 与 `.config` 便于排查 |
 | `use_ccache` | `true` | 用 ccache 缓存目标文件，重复构建会快很多（首次构建基本无收益） |
 | `ntsync` | `false` | **可选**：加入 NTSYNC（跑 Wine / Proton 才需要），详见 [patches/optional/ntsync](patches/optional/ntsync/README.md) |
+| `device_check` | `true` | 安装器机型白名单；代号不在 `dodge/erhai/hummer/ktm` 时设为 `false` |
 
 仓库变量（可选，`Settings → Secrets and variables → Actions → Variables`）：
 
