@@ -266,6 +266,35 @@ cannot execute binary file: Exec format error
 如果你的设备仍不在其中，把工作流的 **`device_check` 设为 `false`** 重新构建即可
 （但请不要在非 SM8750 机型上安装）。
 
+### 4.9 `full` 档无限重启（已知问题，仍在定位）
+
+实测结论（erhai / OnePlus Pad 2 Pro）：
+
+| 档位 | 结果 |
+|---|---|
+| **`core`** | ✅ **可以开机**，Droidspaces 运行正常，需求检查全部通过 |
+| `full` | ❌ 无限重启（无开机动画，2~3 秒后重启） |
+
+**所以请先用 `core`**（现在也是工作流的默认值）。`core` 不是残缺配置，实机内核配置里已有：
+`SYSVIPC` / `PID_NS` / `IPC_NS` / `USER_NS` / `NET_NS` / `UTS_NS` / `TIME_NS` / `DEVTMPFS` /
+`SECCOMP` / `OVERLAY_FS` / `CGROUPS` / `MEMCG` / `CGROUP_FREEZER` / `CGROUP_NET_PRIO` /
+`VETH` / `BRIDGE`，以及 **iptables NAT 全套**（`IP_NF_NAT` / `NF_NAT` / `NF_NAT_REDIRECT` /
+`IP_NF_TARGET_MASQUERADE` / `NETFILTER_XT_TARGET_MASQUERADE` / `NETFILTER_XT_TARGET_TCPMSS`）。
+
+定位过程（已排除的项）：
+
+1. ~~`CONFIG_FW_LOADER_COMPRESS`~~ —— 已关闭，仍然重启，排除
+2. ~~`NF_TABLES` + 18 项 `NFT_*`~~ —— 已移除，排除（且 NAT 用 iptables 就够）
+3. **剩下唯一差异**：`CONFIG_CGROUP_DEVICE` / `CONFIG_CGROUP_PIDS`
+
+现在 `full` 相对 `core` **只多这两个符号**。下次构建 `full`：
+
+- 能开机 → 你就拿到了容器资源限制（cgroup limits），收工
+- 仍重启 → 这两个 cgroup 控制器就是元凶，**`core` 即为最终配置**
+
+（`CGROUP_DEVICE` / `CGROUP_PIDS` 的作用只是容器内的 CPU/内存/PID 限额；
+缺了它们 Droidspaces 只会打印 `[CGROUP] ... limit skipped`，不影响容器启动。）
+
 ---
 
 ## 5. 卸载 / 回退
